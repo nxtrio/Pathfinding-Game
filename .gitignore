@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Build output
+PathfindingGame
+PathfindingGame.dSYM/
+*.o
+*.obj
+*.exe
+
+# VS Code
+.vscode/
+
+# SFML / temp
+*.log
