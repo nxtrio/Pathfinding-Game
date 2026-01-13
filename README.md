@@ -1,4 +1,4 @@
-# Pathfinding Game (SFML)
+# Pathfinding Game
 
 A simple grid-based pathfinding “puzzle” game built with **C++17** and **SFML**.
 
