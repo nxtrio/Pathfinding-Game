@@ -1,10 +1,92 @@
 #include "PathfindingGame.h"
+#include "PathfindingAnimation.h"
+#include <cmath>
 #include <optional>
 #include <string>
 #include <vector>
-#include <algorithm>
 #include <iostream>
 #include <queue>
+#include <sstream>
+
+std::string formatPathLength(const SearchResult& result) {
+    if (!result.metrics.found) return "NO PATH";
+    return std::to_string(result.metrics.pathLength);
+}
+
+std::string formatAlgorithmMetrics(const std::string& name,
+                                   const SearchResult& result) {
+    std::ostringstream text;
+    text << name << '\n'
+         << "  Path length: " << formatPathLength(result) << '\n'
+         << "  Discovered: " << result.metrics.discoveredNodes << '\n'
+         << "  Expanded: " << result.metrics.expandedNodes << '\n'
+         << "  Peak frontier: " << result.metrics.maxFrontierSize << '\n'
+         << "  Single run: " << result.metrics.singleRunMicroseconds << " us\n";
+    return text.str();
+}
+
+std::string formatHudText(GameState state,
+                          int playerPathLength,
+                          const AlgorithmComparison& results,
+                          const AnimationController& animation) {
+    if (isAnimationState(state)) {
+        bool dijkstra = state == ANIMATING_DIJKSTRA ||
+                        state == HOLDING_DIJKSTRA;
+        bool holding = state == HOLDING_DIJKSTRA || state == HOLDING_ASTAR;
+        const SearchResult& activeResult = dijkstra
+            ? results.dijkstra
+            : results.astar;
+
+        std::ostringstream text;
+        text << (dijkstra ? "DIJKSTRA" : "A*")
+             << (holding
+                    ? (activeResult.metrics.found
+                        ? " - PATH COMPLETE\n"
+                        : " - SEARCH COMPLETE\n")
+                    : " - SEARCHING\n");
+        if (animation.paused) text << "PAUSED\n";
+        text << "Speed: " << animationSpeedLabel(animation) << '\n'
+             << "Search: " << animation.searchStepIndex << " / "
+             << activeResult.steps.size() << '\n'
+             << "Path: " << animation.pathStepIndex << " / "
+             << activeResult.path.size() << "\n\n"
+             << formatAlgorithmMetrics(
+                    dijkstra ? "DIJKSTRA" : "A*", activeResult
+                )
+             << "\nP: Pause  -/+: Speed  Esc/R: Cancel";
+        return text.str();
+    }
+
+    if (results.available &&
+        (state == COMPARISON_COMPLETE || state == NO_PATH_RESULT ||
+         state == COMPARISON_ERROR)) {
+        std::ostringstream text;
+        if (state == COMPARISON_COMPLETE) {
+            text << "ALGORITHM COMPARISON\n";
+        } else if (state == NO_PATH_RESULT) {
+            text << "ALGORITHM COMPARISON - NO PATH\n";
+        } else {
+            text << "ALGORITHM COMPARISON - RESULT MISMATCH\n";
+        }
+
+        if (playerPathLength >= 0) {
+            text << "Player route: " << playerPathLength << " steps\n";
+        }
+        text << '\n'
+             << formatAlgorithmMetrics("DIJKSTRA", results.dijkstra) << '\n'
+             << formatAlgorithmMetrics("A*", results.astar) << '\n'
+             << "Space: Compare again  R: Reset";
+        return text.str();
+    }
+
+    if (state == PLAYER_ROUTE_COMPLETE) {
+        return "PLAYER ROUTE COMPLETE\nLength: " +
+               std::to_string(playerPathLength) +
+               " steps\n\nSpace: Compare algorithms";
+    }
+
+    return "Path length: N/A\nSpace: Compare algorithms";
+}
 
 // Generate some non-trivial permanent obstacles
 void generateObstacles(std::vector<std::vector<GridNode*>>& grid,
@@ -131,6 +213,7 @@ int main() {
         "Pathfinding Game"
     );
     window.setFramerateLimit(60);
+    window.setKeyRepeatEnabled(false);
 
     sf::Font font;
     if (!font.openFromFile("assets/arial.ttf")) {
@@ -158,18 +241,26 @@ int main() {
     generateObstacles(grid, startNode, endNode);
 
     // --- HUD: path length text ---
-    sf::Text pathText(font, "", 20);
+    sf::Text pathText(font, "", 18);
     pathText.setFillColor(sf::Color::Black);
+    pathText.setOutlineColor(sf::Color::White);
+    pathText.setOutlineThickness(1.f);
     pathText.setPosition(sf::Vector2f(10.f, 10.f));
-    pathText.setString("Path length: N/A");
+    pathText.setString("Path length: N/A\nSpace: Compare algorithms");
 
-    bool pathCompleted = false;
-    sf::Clock completionClock;
+    GameState gameState = EDITING;
+    AlgorithmComparison comparisonResults;
+    AnimationController animation;
+    int playerPathLength = -1;
     int previousMouseX = -1;
     int previousMouseY = -1;
     NodeType previousEditType = EMPTY;
 
     while (window.isOpen()) {
+        bool compareRequested = false;
+        bool cancelRequested = false;
+        bool resetRequested = false;
+
         // --- Events ---
         while (const std::optional eventOpt = window.pollEvent()) {
             const sf::Event& event = *eventOpt;
@@ -179,15 +270,68 @@ int main() {
                 window.close();
                 continue;
             }
+
+            if (const auto* keyPressed = event.getIf<sf::Event::KeyPressed>()) {
+                if (keyPressed->code == sf::Keyboard::Key::Space &&
+                    !isAnimationState(gameState)) {
+                    compareRequested = true;
+                } else if (keyPressed->code == sf::Keyboard::Key::P &&
+                           isAnimationState(gameState)) {
+                    animation.paused = !animation.paused;
+                } else if ((keyPressed->code == sf::Keyboard::Key::Hyphen ||
+                            keyPressed->code == sf::Keyboard::Key::Subtract) &&
+                           isAnimationState(gameState)) {
+                    changeAnimationSpeed(animation, -1);
+                } else if ((keyPressed->code == sf::Keyboard::Key::Equal ||
+                            keyPressed->code == sf::Keyboard::Key::Add) &&
+                           isAnimationState(gameState)) {
+                    changeAnimationSpeed(animation, 1);
+                } else if (keyPressed->code == sf::Keyboard::Key::Escape &&
+                           isAnimationState(gameState)) {
+                    cancelRequested = true;
+                } else if (keyPressed->code == sf::Keyboard::Key::R) {
+                    resetRequested = true;
+                }
+            }
         }
 
         if (!window.isOpen()) break;
 
+        float animationElapsed = animation.frameClock.restart().asSeconds();
+
+        if (cancelRequested || resetRequested) {
+            restoreGridColors(grid);
+            comparisonResults = AlgorithmComparison{};
+            animation.paused = false;
+            resetAnimationProgress(animation);
+            animationElapsed = 0.f;
+            gameState = playerPathLength >= 0 ? PLAYER_ROUTE_COMPLETE : EDITING;
+            pathText.setString(formatHudText(
+                gameState, playerPathLength, comparisonResults, animation
+            ));
+        }
+
+        if (compareRequested) {
+            restoreGridColors(grid);
+            comparisonResults = beginAlgorithmComparison(
+                grid, startNode, endNode
+            );
+            animation.paused = false;
+            resetAnimationProgress(animation);
+            animationElapsed = 0.f;
+            gameState = ANIMATING_DIJKSTRA;
+            pathText.setString(formatHudText(
+                gameState, playerPathLength, comparisonResults, animation
+            ));
+        }
+
         // --- Continuous mouse input ---
         bool leftPressed = sf::Mouse::isButtonPressed(sf::Mouse::Button::Left);
         bool rightPressed = sf::Mouse::isButtonPressed(sf::Mouse::Button::Right);
+        bool editingEnabled = gameState == EDITING ||
+                              gameState == PLAYER_ROUTE_COMPLETE;
 
-        if (!pathCompleted && (leftPressed || rightPressed)) {
+        if (editingEnabled && (leftPressed || rightPressed)) {
             sf::Vector2i pos = sf::Mouse::getPosition(window);
             int x = pos.x / CELL_SIZE;
             int y = pos.y / CELL_SIZE;
@@ -218,15 +362,66 @@ int main() {
         }
 
         // --- Hand-drawn path detection ---
-        if (!pathCompleted) {
-            int length = computeHandDrawnPathLength(grid, startNode, endNode);
-            if (length >= 0) {
-                pathText.setString("Path length: " + std::to_string(length));
-                pathCompleted = true;
-                completionClock.restart();
-            } else {
-                pathText.setString("Path length: N/A");
+        if (editingEnabled) {
+            playerPathLength = computeHandDrawnPathLength(
+                grid, startNode, endNode
+            );
+            gameState = playerPathLength >= 0 ? PLAYER_ROUTE_COMPLETE : EDITING;
+            pathText.setString(formatHudText(
+                gameState, playerPathLength, comparisonResults, animation
+            ));
+        }
+
+        // --- Non-blocking search animation ---
+        if (isAnimationState(gameState) && !animation.paused) {
+            if (gameState == ANIMATING_DIJKSTRA) {
+                if (updateSearchAnimation(
+                        grid, comparisonResults.dijkstra, true,
+                        animation, animationElapsed)) {
+                    gameState = HOLDING_DIJKSTRA;
+                    animation.holdElapsed = 0.f;
+                }
+            } else if (gameState == HOLDING_DIJKSTRA) {
+                animation.holdElapsed += animationElapsed;
+                if (animation.holdElapsed >= 0.75f) {
+                    restoreGridColors(grid);
+                    completeAlgorithmComparison(
+                        comparisonResults, grid, startNode, endNode
+                    );
+                    if (comparisonResults.status == MISMATCHED_RESULTS) {
+                        gameState = COMPARISON_ERROR;
+                    } else {
+                        resetAnimationProgress(animation);
+                        gameState = ANIMATING_ASTAR;
+                    }
+                }
+            } else if (gameState == ANIMATING_ASTAR) {
+                if (updateSearchAnimation(
+                        grid, comparisonResults.astar, false,
+                        animation, animationElapsed)) {
+                    gameState = HOLDING_ASTAR;
+                    animation.holdElapsed = 0.f;
+                }
+            } else if (gameState == HOLDING_ASTAR) {
+                animation.holdElapsed += animationElapsed;
+                if (animation.holdElapsed >= 0.75f) {
+                    gameState = comparisonResults.status == BOTH_NO_PATH
+                        ? NO_PATH_RESULT
+                        : COMPARISON_COMPLETE;
+                }
             }
+        }
+
+        if (isAnimationState(gameState)) {
+            pathText.setString(formatHudText(
+                gameState, playerPathLength, comparisonResults, animation
+            ));
+        } else if (gameState == COMPARISON_COMPLETE ||
+                   gameState == NO_PATH_RESULT ||
+                   gameState == COMPARISON_ERROR) {
+            pathText.setString(formatHudText(
+                gameState, playerPathLength, comparisonResults, animation
+            ));
         }
 
         // --- Render ---
@@ -239,9 +434,6 @@ int main() {
         window.draw(pathText);
         window.display();
 
-        if (pathCompleted && completionClock.getElapsedTime() >= sf::seconds(0.85f)) {
-            window.close();
-        }
     }
 
     // Cleanup

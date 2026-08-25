@@ -3,9 +3,9 @@
 A simple grid-based pathfinding “puzzle” game built with **C++17** and **SFML**.
 
 You draw a path from a green **start** square to a red **end** square while avoiding purple **obstacle** columns.  
-When your hand-drawn path successfully connects start to end, the game detects it and exits.
+When your hand-drawn path successfully connects start to end, the game keeps its length visible so you can compare it with the algorithms.
 
-> Note: The project also contains implementations of **Dijkstra** and **A\*** pathfinding algorithms in the codebase (`PathfindingGame.cpp`), but the current version of the game UI focuses on **hand-drawn path detection** and does not yet visualize the algorithmic paths.
+> Note: Press **Space** to replay **Dijkstra** and **A\*** on the current board and compare their search behavior and metrics.
 
 ---
 
@@ -27,14 +27,15 @@ When your hand-drawn path successfully connects start to end, the game detects i
 - **Hand-drawn path detection**
 
   - As you draw a route, the game runs a BFS over the grid to see if your **player path + start + end** form a continuous path.
-  - Once a path exists, the game displays the path length in the HUD and then exits.
+  - Once a path exists, the game keeps the player route length visible and remains open for comparison.
 
 - **Pathfinding algorithms (in code)**
 
   - `Dijkstra` and `AStar` classes are implemented in `PathfindingGame.cpp` and operate over the same `GridNode` grid.
   - Each run returns a deterministic `SearchResult` containing trace events, the reconstructed optimal path, and search metrics.
   - Player-path cells remain traversable; only permanent obstacles block the algorithms.
-  - They are not currently hooked up to the main game loop or renderer, but are available for future visualization / comparison features.
+  - Pressing Space animates Dijkstra and then A* on the same board while keeping both results available in the HUD.
+  - Frontier, expanded, and final-path states use distinct colors for each algorithm.
 
 ---
 
@@ -46,11 +47,21 @@ When your hand-drawn path successfully connects start to end, the game detects i
 - **Right mouse button** – erase the player path
   (not allowed on Start, End, or Obstacle cells).
 
+- **Space** – run Dijkstra and A* on the current board, or repeat the comparison.
+
+- **P** – pause or resume the active visualization.
+
+- **- / +** – decrease or increase visualization speed.
+
+- **Escape** – cancel an active visualization and return to editing.
+
+- **R** – reset visualization and comparison results while preserving the player route.
+
 - When your route creates a continuous path from **start** to **end**, the game:
 
   - Computes the path length (number of steps),
   - Updates the HUD text,
-  - Then exits.
+  - Remains available for comparison against the optimal routes.
 
 ---
 

@@ -183,3 +183,60 @@ SearchResult AStar::solve(std::vector<std::vector<GridNode*>>& grid,
                           bool captureSteps) {
     return runSearch(grid, start, end, captureSteps, true);
 }
+
+AlgorithmComparison beginAlgorithmComparison(
+    std::vector<std::vector<GridNode*>>& grid,
+    GridNode* start,
+    GridNode* end,
+    bool captureSteps)
+{
+    Dijkstra dijkstra;
+    AlgorithmComparison comparison;
+
+    comparison.dijkstra = dijkstra.solve(grid, start, end, captureSteps);
+    return comparison;
+}
+
+void completeAlgorithmComparison(
+    AlgorithmComparison& comparison,
+    std::vector<std::vector<GridNode*>>& grid,
+    GridNode* start,
+    GridNode* end,
+    bool captureSteps)
+{
+    AStar astar;
+    comparison.astar = astar.solve(grid, start, end, captureSteps);
+
+    bool bothFound = comparison.dijkstra.metrics.found &&
+                     comparison.astar.metrics.found;
+    bool neitherFound = !comparison.dijkstra.metrics.found &&
+                        !comparison.astar.metrics.found;
+    bool samePathLength = comparison.dijkstra.metrics.pathLength ==
+                          comparison.astar.metrics.pathLength;
+
+    if (bothFound && samePathLength) {
+        comparison.status = MATCHING_PATHS;
+    } else if (neitherFound) {
+        comparison.status = BOTH_NO_PATH;
+    } else {
+        comparison.status = MISMATCHED_RESULTS;
+    }
+
+    comparison.available = true;
+}
+
+AlgorithmComparison runAlgorithmComparison(
+    std::vector<std::vector<GridNode*>>& grid,
+    GridNode* start,
+    GridNode* end,
+    bool captureSteps)
+{
+    AlgorithmComparison comparison = beginAlgorithmComparison(
+        grid, start, end, captureSteps
+    );
+    completeAlgorithmComparison(
+        comparison, grid, start, end, captureSteps
+    );
+
+    return comparison;
+}

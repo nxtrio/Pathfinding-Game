@@ -10,6 +10,7 @@ find_package(SFML 3 REQUIRED COMPONENTS Graphics)
 
 add_executable(PathfindingGame
     src/Main.cpp
+    src/PathfindingAnimation.cpp
     src/PathfindingGame.cpp
 )
 
@@ -28,11 +29,12 @@ include(CTest)
 if(BUILD_TESTING)
     add_executable(PathfindingGameTests
         tests/PathfindingGameTests.cpp
+        src/PathfindingAnimation.cpp
         src/PathfindingGame.cpp
     )
 
     target_include_directories(PathfindingGameTests PRIVATE include)
     target_link_libraries(PathfindingGameTests PRIVATE SFML::Graphics)
 
-    add_test(NAME PathfindingGameAlgorithms COMMAND PathfindingGameTests)
+    add_test(NAME PathfindingGameCore COMMAND PathfindingGameTests)
 endif()

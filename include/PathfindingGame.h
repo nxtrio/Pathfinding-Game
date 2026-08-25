@@ -45,6 +45,15 @@ struct SearchResult {
     SearchMetrics metrics;
 };
 
+enum ComparisonStatus { MATCHING_PATHS, BOTH_NO_PATH, MISMATCHED_RESULTS };
+
+struct AlgorithmComparison {
+    SearchResult dijkstra;
+    SearchResult astar;
+    ComparisonStatus status = MISMATCHED_RESULTS;
+    bool available = false;
+};
+
 // --- 1. The Node Class ---
 // Represents a single square on the grid.
 class GridNode {
@@ -137,5 +146,27 @@ public:
                        GridNode* end,
                        bool captureSteps = true) override;
 };
+
+AlgorithmComparison runAlgorithmComparison(
+    std::vector<std::vector<GridNode*>>& grid,
+    GridNode* start,
+    GridNode* end,
+    bool captureSteps = true
+);
+
+AlgorithmComparison beginAlgorithmComparison(
+    std::vector<std::vector<GridNode*>>& grid,
+    GridNode* start,
+    GridNode* end,
+    bool captureSteps = true
+);
+
+void completeAlgorithmComparison(
+    AlgorithmComparison& comparison,
+    std::vector<std::vector<GridNode*>>& grid,
+    GridNode* start,
+    GridNode* end,
+    bool captureSteps = true
+);
 
 #endif

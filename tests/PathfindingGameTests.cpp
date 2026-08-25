@@ -1,4 +1,5 @@
 #include "PathfindingGame.h"
+#include "PathfindingAnimation.h"
 
 #include <cmath>
 #include <iostream>
@@ -82,6 +83,10 @@ void validateMetrics(const SearchResult& result) {
             "logical frontier cannot exceed unique discovered nodes");
     require(result.metrics.singleRunMicroseconds >= 0,
             "runtime measurement cannot be negative");
+    if (result.metrics.found) {
+        require(result.metrics.pathLength >= 0,
+                "found search must report a non-negative path length");
+    }
 }
 
 void validateTrace(const SearchResult& result,
@@ -107,6 +112,11 @@ void validateTrace(const SearchResult& result,
                     "node must not be expanded more than once");
         }
     }
+
+    require(result.metrics.discoveredNodes == discoveredPositions.size() + 2,
+            "discovered metric must count unique trace nodes plus start and target");
+    require(result.metrics.expandedNodes == expandedPositions.size() + 1,
+            "expanded metric must count unique trace nodes plus start");
 }
 
 bool stableResultMatches(const SearchResult& a, const SearchResult& b) {
@@ -151,12 +161,29 @@ void testStandardMapOptimalityAndMetrics() {
     start->setType(START);
     end->setType(END);
     addStandardObstacles(grid, start, end);
+    grid.nodes[5][6]->setType(PLAYER_PATH);
 
-    Dijkstra dijkstra;
-    AStar astar;
-    SearchResult dijkstraResult = dijkstra.solve(grid.nodes, start, end);
-    SearchResult astarResult = astar.solve(grid.nodes, start, end);
+    std::vector<NodeType> originalTypes;
+    for (const auto& row : grid.nodes) {
+        for (GridNode* node : row) {
+            originalTypes.push_back(node->type);
+        }
+    }
 
+    AlgorithmComparison comparison = beginAlgorithmComparison(
+        grid.nodes, start, end
+    );
+    require(!comparison.available,
+            "comparison must wait for A* before reporting completion");
+    require(comparison.dijkstra.metrics.found && comparison.astar.path.empty(),
+            "staged comparison must retain Dijkstra before running A*");
+    completeAlgorithmComparison(comparison, grid.nodes, start, end);
+    const SearchResult& dijkstraResult = comparison.dijkstra;
+    const SearchResult& astarResult = comparison.astar;
+
+    require(comparison.available, "comparison must retain both algorithm results");
+    require(comparison.status == MATCHING_PATHS,
+            "standard-map comparison must report matching optimal paths");
     validatePath(grid, start, end, dijkstraResult);
     validatePath(grid, start, end, astarResult);
     validateMetrics(dijkstraResult);
@@ -167,6 +194,14 @@ void testStandardMapOptimalityAndMetrics() {
             "Dijkstra and A* must find the same optimal length");
     require(start->hCost == 30.0,
             "A* must initialize the start Manhattan heuristic");
+
+    std::size_t typeIndex = 0;
+    for (const auto& row : grid.nodes) {
+        for (GridNode* node : row) {
+            require(node->type == originalTypes[typeIndex++],
+                    "comparison must not mutate logical board state");
+        }
+    }
 }
 
 void testKnownPathLengthAndPlayerPathTraversability() {
@@ -179,11 +214,14 @@ void testKnownPathLengthAndPlayerPathTraversability() {
         grid.nodes[0][x]->setType(PLAYER_PATH);
     }
 
-    Dijkstra dijkstra;
-    AStar astar;
-    SearchResult dijkstraResult = dijkstra.solve(grid.nodes, start, end, false);
-    SearchResult astarResult = astar.solve(grid.nodes, start, end, false);
+    AlgorithmComparison comparison = runAlgorithmComparison(
+        grid.nodes, start, end, false
+    );
+    const SearchResult& dijkstraResult = comparison.dijkstra;
+    const SearchResult& astarResult = comparison.astar;
 
+    require(comparison.status == MATCHING_PATHS,
+            "player-path comparison must report matching optimal paths");
     validatePath(grid, start, end, dijkstraResult);
     validatePath(grid, start, end, astarResult);
     require(dijkstraResult.metrics.pathLength == 4,
@@ -209,13 +247,20 @@ void testRepeatedDeterministicRuns() {
         grid.nodes[y][3]->setType(OBSTACLE);
     }
 
-    Dijkstra dijkstra;
-    AStar astar;
-    SearchResult firstDijkstra = dijkstra.solve(grid.nodes, start, end);
-    SearchResult firstAStar = astar.solve(grid.nodes, start, end);
-    SearchResult secondDijkstra = dijkstra.solve(grid.nodes, start, end);
-    SearchResult secondAStar = astar.solve(grid.nodes, start, end);
+    AlgorithmComparison firstComparison = runAlgorithmComparison(
+        grid.nodes, start, end
+    );
+    AlgorithmComparison secondComparison = runAlgorithmComparison(
+        grid.nodes, start, end
+    );
+    const SearchResult& firstDijkstra = firstComparison.dijkstra;
+    const SearchResult& firstAStar = firstComparison.astar;
+    const SearchResult& secondDijkstra = secondComparison.dijkstra;
+    const SearchResult& secondAStar = secondComparison.astar;
 
+    require(firstComparison.status == MATCHING_PATHS &&
+            secondComparison.status == MATCHING_PATHS,
+            "repeated comparisons must report matching optimal paths");
     require(stableResultMatches(firstDijkstra, secondDijkstra),
             "repeated Dijkstra runs must be deterministic and independent");
     require(stableResultMatches(firstAStar, secondAStar),
@@ -240,10 +285,15 @@ void testNoPathAndStaleParentReset() {
         grid.nodes[y][1]->setType(OBSTACLE);
     }
 
-    AStar astar;
-    SearchResult astarResult = astar.solve(grid.nodes, start, end);
-    SearchResult dijkstraResult = dijkstra.solve(grid.nodes, start, end);
+    AlgorithmComparison comparison = runAlgorithmComparison(
+        grid.nodes, start, end
+    );
+    const SearchResult& astarResult = comparison.astar;
+    const SearchResult& dijkstraResult = comparison.dijkstra;
 
+    require(comparison.available, "no-path comparison must retain both results");
+    require(comparison.status == BOTH_NO_PATH,
+            "blocked comparison must distinguish shared no-path outcome");
     for (const SearchResult* result : {&astarResult, &dijkstraResult}) {
         require(!result->metrics.found, "blocked board must report no path");
         require(result->metrics.pathLength == -1,
@@ -255,12 +305,100 @@ void testNoPathAndStaleParentReset() {
             "failed repeated search must not retain a stale target parent");
 }
 
+void testAnimationReplayAndLogicalStateSafety() {
+    TestGrid grid(1, 3);
+    GridNode* start = grid.nodes[0][0];
+    GridNode* playerPath = grid.nodes[0][1];
+    GridNode* end = grid.nodes[0][2];
+    start->setType(START);
+    playerPath->setType(PLAYER_PATH);
+    end->setType(END);
+
+    sf::Color startColor = start->shape.getFillColor();
+    sf::Color playerPathColor = playerPath->shape.getFillColor();
+    sf::Color endColor = end->shape.getFillColor();
+
+    SearchResult result;
+    result.steps = {
+        {{1, 0}, DISCOVERED},
+        {{1, 0}, EXPANDED}
+    };
+    result.path = {{0, 0}, {1, 0}, {2, 0}};
+    result.metrics.found = true;
+    result.metrics.pathLength = 2;
+
+    AnimationController animation;
+    require(isAnimationState(ANIMATING_DIJKSTRA) &&
+            isAnimationState(HOLDING_ASTAR) &&
+            !isAnimationState(EDITING),
+            "animation-state classification must be explicit");
+
+    require(!updateSearchAnimation(
+                grid.nodes, result, true, animation, 0.001f),
+            "sub-interval update must not finish replay");
+    require(animation.searchStepIndex == 0,
+            "sub-interval update must not consume a search event");
+
+    updateSearchAnimation(grid.nodes, result, true, animation, 0.002f);
+    require(playerPath->shape.getFillColor() == sf::Color(0, 220, 255),
+            "Dijkstra discovery must use frontier color");
+
+    updateSearchAnimation(grid.nodes, result, true, animation, 0.0025f);
+    require(playerPath->shape.getFillColor() == sf::Color(40, 120, 210),
+            "Dijkstra expansion must replace frontier color");
+
+    updateSearchAnimation(grid.nodes, result, true, animation, 0.f);
+    require(animation.stage == REVEALING_PATH,
+            "search completion must transition to path reveal");
+    updateSearchAnimation(grid.nodes, result, true, animation, 0.025f);
+    updateSearchAnimation(grid.nodes, result, true, animation, 0.025f);
+    require(playerPath->shape.getFillColor() == sf::Color(255, 245, 120),
+            "final route must use the distinct path color");
+    require(updateSearchAnimation(
+                grid.nodes, result, true, animation, 0.025f),
+            "path replay must report completion");
+
+    require(start->shape.getFillColor() == startColor &&
+            end->shape.getFillColor() == endColor,
+            "animation must preserve start and target appearance");
+    require(start->type == START && playerPath->type == PLAYER_PATH &&
+            end->type == END,
+            "animation must never mutate logical node types");
+
+    restoreGridColors(grid.nodes);
+    require(playerPath->shape.getFillColor() == playerPathColor,
+            "restoring colors must recover the permanent player-path visual");
+
+    resetAnimationProgress(animation);
+    updateSearchAnimation(grid.nodes, result, false, animation, 0.003f);
+    require(playerPath->shape.getFillColor() == sf::Color(255, 220, 40),
+            "A* discovery must use a distinct frontier color");
+    updateSearchAnimation(grid.nodes, result, false, animation, 0.0025f);
+    require(playerPath->shape.getFillColor() == sf::Color(235, 130, 35),
+            "A* expansion must use a distinct explored color");
+
+    SearchResult noPathResult;
+    noPathResult.steps = {{{1, 0}, DISCOVERED}};
+    resetAnimationProgress(animation);
+    require(updateSearchAnimation(
+                grid.nodes, noPathResult, false, animation, 1.f),
+            "no-path trace must finish safely without path coordinates");
+
+    for (int i = 0; i < 10; ++i) changeAnimationSpeed(animation, -1);
+    require(animationSpeedLabel(animation) == "0.25x",
+            "animation speed must clamp at its minimum");
+    for (int i = 0; i < 10; ++i) changeAnimationSpeed(animation, 1);
+    require(animationSpeedLabel(animation) == "4x",
+            "animation speed must clamp at its maximum");
+}
+
 int main() {
     try {
         testStandardMapOptimalityAndMetrics();
         testKnownPathLengthAndPlayerPathTraversability();
         testRepeatedDeterministicRuns();
         testNoPathAndStaleParentReset();
+        testAnimationReplayAndLogicalStateSafety();
     } catch (const std::exception& error) {
         std::cerr << "PathfindingGameTests failed: " << error.what() << '\n';
         return 1;
