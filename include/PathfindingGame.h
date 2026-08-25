@@ -47,9 +47,18 @@ struct SearchResult {
 
 enum ComparisonStatus { MATCHING_PATHS, BOTH_NO_PATH, MISMATCHED_RESULTS };
 
+struct BenchmarkMetrics {
+    bool available = false;
+    std::size_t warmupRuns = 0;
+    std::size_t measuredRuns = 0;
+    long long dijkstraMedianNanoseconds = 0;
+    long long astarMedianNanoseconds = 0;
+};
+
 struct AlgorithmComparison {
     SearchResult dijkstra;
     SearchResult astar;
+    BenchmarkMetrics benchmark;
     ComparisonStatus status = MISMATCHED_RESULTS;
     bool available = false;
 };
@@ -84,27 +93,26 @@ public:
             static_cast<float>(x * CELL_SIZE),
             static_cast<float>(y * CELL_SIZE)
         ));
-        shape.setFillColor(sf::Color::White);
+        shape.setFillColor(sf::Color(24, 31, 47));
     }
 
     void setType(NodeType t) {
         type = t;
         switch (type) {
             case EMPTY:
-                shape.setFillColor(sf::Color::White);
+                shape.setFillColor(sf::Color(24, 31, 47));
                 break;
             case PLAYER_PATH:
-                shape.setFillColor(sf::Color(50, 50, 50)); // dark grey player route
+                shape.setFillColor(sf::Color(91, 65, 145));
                 break;
             case START:
-                shape.setFillColor(sf::Color::Green);
+                shape.setFillColor(sf::Color(36, 200, 120));
                 break;
             case END:
-                shape.setFillColor(sf::Color::Red);
+                shape.setFillColor(sf::Color(238, 82, 104));
                 break;
             case OBSTACLE:
-                // permanent obstacle – purple-ish so it stands out
-                shape.setFillColor(sf::Color(150, 0, 150));
+                shape.setFillColor(sf::Color(43, 38, 58));
                 break;
         }
     }
@@ -167,6 +175,14 @@ void completeAlgorithmComparison(
     GridNode* start,
     GridNode* end,
     bool captureSteps = true
+);
+
+BenchmarkMetrics benchmarkAlgorithms(
+    std::vector<std::vector<GridNode*>>& grid,
+    GridNode* start,
+    GridNode* end,
+    std::size_t warmupRuns = 10,
+    std::size_t measuredRuns = 200
 );
 
 #endif

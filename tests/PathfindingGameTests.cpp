@@ -1,5 +1,6 @@
 #include "PathfindingGame.h"
 #include "PathfindingAnimation.h"
+#include "ComparisonUI.h"
 
 #include <cmath>
 #include <iostream>
@@ -427,6 +428,8 @@ void testFinalComparisonOverlayAndPathSegments() {
     require(overlay[0][4] == NOT_EXPANDED,
             "discovery without expansion must not enter the final overlay");
 
+    sf::Color startColor = grid.nodes[0][0]->shape.getFillColor();
+    sf::Color endColor = grid.nodes[0][4]->shape.getFillColor();
     grid.nodes[0][1]->shape.setFillColor(sf::Color::Magenta);
     applyComparisonOverlay(grid.nodes, comparison);
     require(grid.nodes[0][1]->shape.getFillColor() ==
@@ -438,8 +441,8 @@ void testFinalComparisonOverlayAndPathSegments() {
     require(grid.nodes[0][3]->shape.getFillColor() ==
                 comparisonCellColor(ASTAR_ONLY),
             "A*-only cells must use the A* overlay color");
-    require(grid.nodes[0][0]->shape.getFillColor() == sf::Color::Green &&
-            grid.nodes[0][4]->shape.getFillColor() == sf::Color::Red,
+    require(grid.nodes[0][0]->shape.getFillColor() == startColor &&
+            grid.nodes[0][4]->shape.getFillColor() == endColor,
             "final overlay must preserve start and target visuals");
     for (std::size_t x = 0; x < grid.nodes[0].size(); ++x) {
         require(grid.nodes[0][x]->type == originalTypes[x],
@@ -475,6 +478,114 @@ void testFinalComparisonOverlayAndPathSegments() {
     }
 }
 
+void testComparisonPanelModelAndActions() {
+    require(WINDOW_WIDTH == 1320 && BOARD_WIDTH == 1000 &&
+            BOARD_HEIGHT == 750,
+            "side panel must preserve the exact 1000x750 board geometry");
+    require(comparisonPanelActionAt(sf::Vector2f(1030.f, 150.f)) ==
+                COMPARE_ACTION,
+            "Compare button must expose a clickable panel action");
+    require(comparisonPanelActionAt(sf::Vector2f(1120.f, 150.f)) ==
+                RESET_ACTION,
+            "Reset button must expose a clickable panel action");
+    require(comparisonPanelActionAt(sf::Vector2f(1200.f, 150.f)) ==
+                CLEAR_ROUTE_ACTION,
+            "Clear Route button must expose a clickable panel action");
+    require(comparisonPanelActionAt(sf::Vector2f(500.f, 150.f)) ==
+                NO_PANEL_ACTION,
+            "board clicks must never trigger side-panel controls");
+
+    AlgorithmComparison comparison;
+    comparison.available = true;
+    comparison.status = MATCHING_PATHS;
+    comparison.dijkstra.metrics = {true, 8, 120, 100, 30, 0};
+    comparison.astar.metrics = {true, 8, 55, 40, 15, 0};
+    AnimationController animation;
+
+    ComparisonPanelText text = buildComparisonPanelText(
+        COMPARISON_COMPLETE, 10, comparison, animation
+    );
+    require(text.stateTitle == "COMPARISON COMPLETE" &&
+            text.dijkstraState == "COMPLETE" &&
+            text.astarState == "COMPLETE",
+            "final panel must expose both algorithm names and states");
+    require(text.explorationSummary ==
+                "A* expanded 60.0% fewer nodes.",
+            "panel efficiency statement must use Dijkstra as its baseline");
+    require(text.playerSummary.find("Efficiency: 80.0%") !=
+                std::string::npos &&
+            text.playerSummary.find("2 steps above optimal") !=
+                std::string::npos,
+            "panel must compare the player route with the optimal result");
+
+    animation.paused = true;
+    text = buildComparisonPanelText(
+        ANIMATING_DIJKSTRA, -1, comparison, animation
+    );
+    require(text.stateTitle == "DIJKSTRA - PAUSED" &&
+            text.dijkstraState == "PAUSED" && text.astarState == "WAITING",
+            "animation panel must report active and waiting algorithm states");
+
+    animation.paused = false;
+    animation.stage = REVEALING_PATH;
+    animation.pathStepIndex = 3;
+    comparison.dijkstra.path.resize(8);
+    text = buildComparisonPanelText(
+        ANIMATING_DIJKSTRA, -1, comparison, animation
+    );
+    require(text.stateTitle == "DIJKSTRA - PATH" &&
+            text.dijkstraState == "PATH" &&
+            text.stateDetail.find("Path 3/8") != std::string::npos,
+            "panel must distinguish path reveal from search replay");
+
+    comparison.dijkstra.metrics.expandedNodes = 20;
+    comparison.astar.metrics.expandedNodes = 25;
+    text = buildComparisonPanelText(
+        COMPARISON_COMPLETE, -1, comparison, animation
+    );
+    require(text.explorationSummary == "A* expanded 25.0% more nodes.",
+            "panel statement must remain correct when A* expands more");
+}
+
+void testRepeatedBenchmark() {
+    TestGrid grid(6, 6);
+    GridNode* start = grid.nodes[0][0];
+    GridNode* end = grid.nodes[5][5];
+    start->setType(START);
+    end->setType(END);
+    grid.nodes[2][2]->setType(OBSTACLE);
+    grid.nodes[3][2]->setType(PLAYER_PATH);
+
+    std::vector<NodeType> originalTypes;
+    for (const auto& row : grid.nodes) {
+        for (GridNode* node : row) originalTypes.push_back(node->type);
+    }
+
+    BenchmarkMetrics benchmark = benchmarkAlgorithms(
+        grid.nodes, start, end, 2, 9
+    );
+    require(benchmark.available && benchmark.warmupRuns == 2 &&
+            benchmark.measuredRuns == 9,
+            "benchmark must report its warm-up and measured run counts");
+    require(benchmark.dijkstraMedianNanoseconds >= 0 &&
+            benchmark.astarMedianNanoseconds >= 0,
+            "benchmark medians must be valid non-negative durations");
+
+    std::size_t typeIndex = 0;
+    for (const auto& row : grid.nodes) {
+        for (GridNode* node : row) {
+            require(node->type == originalTypes[typeIndex++],
+                    "benchmark runs must preserve permanent grid state");
+        }
+    }
+
+    BenchmarkMetrics emptyBenchmark = benchmarkAlgorithms(
+        grid.nodes, start, end, 2, 0
+    );
+    require(!emptyBenchmark.available && emptyBenchmark.measuredRuns == 0,
+            "zero measured runs must not report a benchmark result");
+}
+
 int main() {
     try {
         testStandardMapOptimalityAndMetrics();
@@ -483,6 +594,8 @@ int main() {
         testNoPathAndStaleParentReset();
         testAnimationReplayAndLogicalStateSafety();
         testFinalComparisonOverlayAndPathSegments();
+        testComparisonPanelModelAndActions();
+        testRepeatedBenchmark();
     } catch (const std::exception& error) {
         std::cerr << "PathfindingGameTests failed: " << error.what() << '\n';
         return 1;

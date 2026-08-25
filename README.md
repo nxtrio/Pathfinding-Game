@@ -1,8 +1,8 @@
 # Pathfinding Game
 
-A simple grid-based pathfinding “puzzle” game built with **C++17** and **SFML**.
+A grid-based **Player vs. Dijkstra vs. A\*** challenge and search visualizer built with **C++17** and **SFML**.
 
-You draw a path from a green **start** square to a red **end** square while avoiding purple **obstacle** columns.  
+You draw a path from an emerald **start** square to a coral **end** square while avoiding dark obstacle columns.
 When your hand-drawn path successfully connects start to end, the game keeps its length visible so you can compare it with the algorithms.
 
 > Note: Press **Space** to replay **Dijkstra** and **A\*** on the current board and compare their search behavior and metrics.
@@ -18,11 +18,11 @@ When your hand-drawn path successfully connects start to end, the game keeps its
 
 - **Special cell types**
 
-  - **Start** (green square)
-  - **End** (red square)
-  - **Obstacle** (purple columns) – pre-generated and **cannot** be edited by the user.
-  - **Player path** (dark grey) – user-drawn, traversable route segments.
-  - **Empty** (white) – open space.
+  - **Start** (emerald square)
+  - **End** (coral square)
+  - **Obstacle** (dark charcoal-purple columns) – pre-generated and **cannot** be edited by the user.
+  - **Player path** (muted purple) – user-drawn, traversable route segments.
+  - **Empty** (dark slate) – open space.
 
 - **Hand-drawn path detection**
 
@@ -34,9 +34,11 @@ When your hand-drawn path successfully connects start to end, the game keeps its
   - `Dijkstra` and `AStar` classes are implemented in `PathfindingGame.cpp` and operate over the same `GridNode` grid.
   - Each run returns a deterministic `SearchResult` containing trace events, the reconstructed optimal path, and search metrics.
   - Player-path cells remain traversable; only permanent obstacles block the algorithms.
-  - Pressing Space animates Dijkstra and then A* on the same board while keeping both results available in the HUD.
+  - Pressing Space animates Dijkstra and then A* on the same board while keeping both results available in the side panel.
   - Frontier, expanded, and final-path states use distinct colors for each algorithm.
   - The final overlay distinguishes Dijkstra-only, A*-only, and shared expanded cells, then draws the optimal route as a continuous line above the grid.
+  - A persistent side panel shows algorithm states, a metric table, expanded-node bars, player efficiency, controls, and the final-overlay legend.
+  - After both animations, a trace-free benchmark reports each algorithm's median search time over 200 measured runs.
 
 ---
 
@@ -58,10 +60,14 @@ When your hand-drawn path successfully connects start to end, the game keeps its
 
 - **R** – reset visualization and comparison results while preserving the player route.
 
+- **C** – clear the player route and comparison results.
+
+- The side-panel **Compare**, **Reset**, and **Clear Route** buttons provide the same core actions with the mouse.
+
 - When your route creates a continuous path from **start** to **end**, the game:
 
   - Computes the path length (number of steps),
-  - Updates the HUD text,
+  - Updates the side-panel player statistics,
   - Remains available for comparison against the optimal routes.
 
 ---
@@ -82,6 +88,22 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/PathfindingGame
 ```
+
+For meaningful benchmark results, use a Release build:
+
+```bash
+cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release
+./build-release/PathfindingGame
+```
+
+---
+
+## Benchmark Methodology
+
+The benchmark is separate from animation time. After both visual replays finish, the game performs 10 warm-up runs and 200 measured runs per algorithm with trace capture disabled. Every iteration runs the full search on the same grid and resets costs, parents, and frontier metadata. Dijkstra and A* alternate measurement order, and the side panel reports the median using `std::chrono::steady_clock`.
+
+Absolute timings depend on the CPU, compiler, build mode, operating system scheduling, and other machine activity. Nodes expanded and discovered are the more stable educational comparison; benchmark time is a secondary performance metric.
 
 ---
 

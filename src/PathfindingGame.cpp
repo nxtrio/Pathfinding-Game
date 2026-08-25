@@ -240,3 +240,64 @@ AlgorithmComparison runAlgorithmComparison(
 
     return comparison;
 }
+
+static long long medianDuration(std::vector<long long> samples) {
+    if (samples.empty()) return 0;
+    std::sort(samples.begin(), samples.end());
+
+    std::size_t middle = samples.size() / 2;
+    if (samples.size() % 2 == 1) return samples[middle];
+    return samples[middle - 1] +
+           (samples[middle] - samples[middle - 1]) / 2;
+}
+
+BenchmarkMetrics benchmarkAlgorithms(
+    std::vector<std::vector<GridNode*>>& grid,
+    GridNode* start,
+    GridNode* end,
+    std::size_t warmupRuns,
+    std::size_t measuredRuns)
+{
+    BenchmarkMetrics benchmark;
+    benchmark.warmupRuns = warmupRuns;
+    benchmark.measuredRuns = measuredRuns;
+    if (measuredRuns == 0) return benchmark;
+
+    Dijkstra dijkstra;
+    AStar astar;
+
+    for (std::size_t run = 0; run < warmupRuns; ++run) {
+        dijkstra.solve(grid, start, end, false);
+        astar.solve(grid, start, end, false);
+    }
+
+    std::vector<long long> dijkstraDurations;
+    std::vector<long long> astarDurations;
+    dijkstraDurations.reserve(measuredRuns);
+    astarDurations.reserve(measuredRuns);
+
+    auto measure = [&](Pathfinder& pathfinder) {
+        auto started = std::chrono::steady_clock::now();
+        pathfinder.solve(grid, start, end, false);
+        auto finished = std::chrono::steady_clock::now();
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+            finished - started
+        ).count();
+    };
+
+    // Alternate order so neither solver always benefits from running second.
+    for (std::size_t run = 0; run < measuredRuns; ++run) {
+        if (run % 2 == 0) {
+            dijkstraDurations.push_back(measure(dijkstra));
+            astarDurations.push_back(measure(astar));
+        } else {
+            astarDurations.push_back(measure(astar));
+            dijkstraDurations.push_back(measure(dijkstra));
+        }
+    }
+
+    benchmark.dijkstraMedianNanoseconds = medianDuration(dijkstraDurations);
+    benchmark.astarMedianNanoseconds = medianDuration(astarDurations);
+    benchmark.available = true;
+    return benchmark;
+}

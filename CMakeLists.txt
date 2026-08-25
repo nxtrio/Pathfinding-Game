@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(SFML 3 REQUIRED COMPONENTS Graphics)
 
 add_executable(PathfindingGame
+    src/ComparisonUI.cpp
     src/Main.cpp
     src/PathfindingAnimation.cpp
     src/PathfindingGame.cpp
@@ -29,6 +30,7 @@ include(CTest)
 if(BUILD_TESTING)
     add_executable(PathfindingGameTests
         tests/PathfindingGameTests.cpp
+        src/ComparisonUI.cpp
         src/PathfindingAnimation.cpp
         src/PathfindingGame.cpp
     )
