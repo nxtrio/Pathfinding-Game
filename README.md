@@ -52,6 +52,24 @@ When your hand-drawn path successfully connects start to end, the game detects i
 
 ---
 
+## Build and Run
+
+The project requires a C++17 compiler, CMake, and SFML 3. On macOS, SFML can be installed with Homebrew:
+
+```bash
+brew install sfml
+```
+
+Configure, build, and run the game from the repository root:
+
+```bash
+cmake -S . -B build
+cmake --build build
+./build/PathfindingGame
+```
+
+---
+
 ## How It Works (High-Level Code Overview)
 
 ### 1. `GridNode` and `NodeType` (`PathfindingGame.h`)

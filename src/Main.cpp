@@ -80,6 +80,45 @@ int computeHandDrawnPathLength(const std::vector<std::vector<GridNode*>>& grid,
     return -1; // not connected
 }
 
+// Draw or erase every cell between two sampled mouse positions.
+void editGridLine(std::vector<std::vector<GridNode*>>& grid,
+                  GridNode* startNode,
+                  GridNode* endNode,
+                  int startX,
+                  int startY,
+                  int endX,
+                  int endY,
+                  NodeType editType)
+{
+    int x = startX;
+    int y = startY;
+    int dx = std::abs(endX - startX);
+    int dy = std::abs(endY - startY);
+    int stepX = startX < endX ? 1 : -1;
+    int stepY = startY < endY ? 1 : -1;
+    int error = dx - dy;
+
+    while (true) {
+        if (x >= 0 && x < COL_COUNT && y >= 0 && y < ROW_COUNT) {
+            GridNode* n = grid[y][x];
+            if (n != startNode && n != endNode && n->type != OBSTACLE) {
+                n->setType(editType);
+            }
+        }
+
+        if (x == endX && y == endY) break;
+
+        int doubledError = 2 * error;
+        if (doubledError > -dy) {
+            error -= dy;
+            x += stepX;
+        } else if (doubledError < dx) {
+            error += dx;
+            y += stepY;
+        }
+    }
+}
+
 int main() {
     // SFML 3: VideoMode takes a Vector2u
     sf::RenderWindow window(
@@ -88,6 +127,12 @@ int main() {
         "Pathfinding Game"
     );
     window.setFramerateLimit(60);
+
+    sf::Font font;
+    if (!font.openFromFile("assets/arial.ttf")) {
+        std::cerr << "Failed to load font for HUD (assets/arial.ttf)\n";
+        return 1;
+    }
 
     // Initialize Grid
     std::vector<std::vector<GridNode*>> grid(
@@ -109,17 +154,16 @@ int main() {
     generateObstacles(grid, startNode, endNode);
 
     // --- HUD: path length text ---
-    sf::Font font;
-    if (!font.openFromFile("assets/arial.ttf")) {
-        std::cerr << "Failed to load font for HUD (assets/arial.ttf)\n";
-    }
-
     sf::Text pathText(font, "", 20);
-    pathText.setFillColor(sf::Color::White);
+    pathText.setFillColor(sf::Color::Black);
     pathText.setPosition(sf::Vector2f(10.f, 10.f));
     pathText.setString("Path length: N/A");
 
-    bool shouldClose = false;
+    bool pathCompleted = false;
+    sf::Clock completionClock;
+    int previousMouseX = -1;
+    int previousMouseY = -1;
+    NodeType previousEditType = EMPTY;
 
     while (window.isOpen()) {
         // --- Events ---
@@ -131,44 +175,54 @@ int main() {
                 window.close();
                 continue;
             }
+        }
 
-            // Left Click: Draw Wall (but not on START/END/OBSTACLE)
-            if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) {
-                sf::Vector2i pos = sf::Mouse::getPosition(window);
-                int x = pos.x / CELL_SIZE;
-                int y = pos.y / CELL_SIZE;
+        if (!window.isOpen()) break;
 
-                if (x >= 0 && x < COL_COUNT && y >= 0 && y < ROW_COUNT) {
-                    GridNode* n = grid[y][x];
-                    if (n != startNode && n != endNode && n->type != OBSTACLE) {
-                        n->setType(WALL);
-                    }
+        // --- Continuous mouse input ---
+        bool leftPressed = sf::Mouse::isButtonPressed(sf::Mouse::Button::Left);
+        bool rightPressed = sf::Mouse::isButtonPressed(sf::Mouse::Button::Right);
+
+        if (!pathCompleted && (leftPressed || rightPressed)) {
+            sf::Vector2i pos = sf::Mouse::getPosition(window);
+            int x = pos.x / CELL_SIZE;
+            int y = pos.y / CELL_SIZE;
+            NodeType editType = rightPressed ? EMPTY : WALL;
+
+            if (pos.x >= 0 && pos.y >= 0 &&
+                x < COL_COUNT && y < ROW_COUNT) {
+                int lineStartX = x;
+                int lineStartY = y;
+                if (previousMouseX >= 0 && previousMouseY >= 0 &&
+                    previousEditType == editType) {
+                    lineStartX = previousMouseX;
+                    lineStartY = previousMouseY;
                 }
-            }
 
-            // Right Click: Erase (but not START/END/OBSTACLE)
-            if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Right)) {
-                sf::Vector2i pos = sf::Mouse::getPosition(window);
-                int x = pos.x / CELL_SIZE;
-                int y = pos.y / CELL_SIZE;
-
-                if (x >= 0 && x < COL_COUNT && y >= 0 && y < ROW_COUNT) {
-                    GridNode* n = grid[y][x];
-                    if (n != startNode && n != endNode && n->type != OBSTACLE) {
-                        n->setType(EMPTY);
-                    }
-                }
+                editGridLine(grid, startNode, endNode,
+                             lineStartX, lineStartY, x, y, editType);
+                previousMouseX = x;
+                previousMouseY = y;
+                previousEditType = editType;
+            } else {
+                previousMouseX = -1;
+                previousMouseY = -1;
             }
+        } else {
+            previousMouseX = -1;
+            previousMouseY = -1;
         }
 
         // --- Hand-drawn path detection ---
-        int length = computeHandDrawnPathLength(grid, startNode, endNode);
-        if (length >= 0) {
-            pathText.setString("Path length: " + std::to_string(length));
-            shouldClose = true;   // we’ll close after drawing this frame
-        } else {
-            pathText.setString("Path length: N/A");
-            shouldClose = false;
+        if (!pathCompleted) {
+            int length = computeHandDrawnPathLength(grid, startNode, endNode);
+            if (length >= 0) {
+                pathText.setString("Path length: " + std::to_string(length));
+                pathCompleted = true;
+                completionClock.restart();
+            } else {
+                pathText.setString("Path length: N/A");
+            }
         }
 
         // --- Render ---
@@ -181,7 +235,7 @@ int main() {
         window.draw(pathText);
         window.display();
 
-        if (shouldClose) {
+        if (pathCompleted && completionClock.getElapsedTime() >= sf::seconds(0.85f)) {
             window.close();
         }
     }

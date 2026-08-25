@@ -1,11 +1,26 @@
 #include "PathfindingGame.h"
 
-// Helper struct for Priority Queue comparison
-struct NodeCompare {
-    bool operator()(const GridNode* a, const GridNode* b) const {
-        return a->fCost > b->fCost; // Min-heap behavior
+// Helper structs for Priority Queue comparison
+struct QueueEntry {
+    double priority;
+    GridNode* node;
+};
+
+struct QueueEntryCompare {
+    bool operator()(const QueueEntry& a, const QueueEntry& b) const {
+        return a.priority > b.priority; // Min-heap behavior
     }
 };
+
+void resetSolverState(std::vector<std::vector<GridNode*>>& grid,
+                      std::vector<GridNode*>& nodesToAnimate) {
+    for (auto& row : grid) {
+        for (GridNode* node : row) {
+            node->resetPathData();
+        }
+    }
+    nodesToAnimate.clear();
+}
 
 // Helper to get valid neighbors (Up, Down, Left, Right)
 std::vector<GridNode*> getNeighbors(GridNode* node,
@@ -27,15 +42,23 @@ void Dijkstra::solve(std::vector<std::vector<GridNode*>>& grid,
                      GridNode* start,
                      GridNode* end,
                      std::vector<GridNode*>& nodesToAnimate) {
-    std::priority_queue<GridNode*, std::vector<GridNode*>, NodeCompare> pq;
+    resetSolverState(grid, nodesToAnimate);
+
+    std::priority_queue<QueueEntry,
+                        std::vector<QueueEntry>,
+                        QueueEntryCompare> pq;
 
     start->gCost = 0.0;
     start->fCost = 0.0;
-    pq.push(start);
+    start->parent = nullptr;
+    pq.push({start->fCost, start});
 
     while (!pq.empty()) {
-        GridNode* current = pq.top();
+        QueueEntry entry = pq.top();
         pq.pop();
+        GridNode* current = entry.node;
+
+        if (entry.priority != current->fCost) continue;
 
         // Capture order for animation
         if (current != start && current != end) {
@@ -55,7 +78,7 @@ void Dijkstra::solve(std::vector<std::vector<GridNode*>>& grid,
                 neighbor->gCost = tempG;
                 neighbor->fCost = tempG; // For Dijkstra, f = g
                 neighbor->parent = current;
-                pq.push(neighbor);
+                pq.push({neighbor->fCost, neighbor});
             }
         }
     }
@@ -66,15 +89,25 @@ void AStar::solve(std::vector<std::vector<GridNode*>>& grid,
                   GridNode* start,
                   GridNode* end,
                   std::vector<GridNode*>& nodesToAnimate) {
-    std::priority_queue<GridNode*, std::vector<GridNode*>, NodeCompare> pq;
+    resetSolverState(grid, nodesToAnimate);
+
+    std::priority_queue<QueueEntry,
+                        std::vector<QueueEntry>,
+                        QueueEntryCompare> pq;
 
     start->gCost = 0.0;
-    start->fCost = 0.0;
-    pq.push(start);
+    start->hCost = std::abs(start->x - end->x)
+                 + std::abs(start->y - end->y);
+    start->fCost = start->gCost + start->hCost;
+    start->parent = nullptr;
+    pq.push({start->fCost, start});
 
     while (!pq.empty()) {
-        GridNode* current = pq.top();
+        QueueEntry entry = pq.top();
         pq.pop();
+        GridNode* current = entry.node;
+
+        if (entry.priority != current->fCost) continue;
 
         if (current != start && current != end) {
             nodesToAnimate.push_back(current);
@@ -96,7 +129,7 @@ void AStar::solve(std::vector<std::vector<GridNode*>>& grid,
                                 + std::abs(neighbor->y - end->y);
                 neighbor->fCost = neighbor->gCost + neighbor->hCost; // F = G + H
                 neighbor->parent = current;
-                pq.push(neighbor);
+                pq.push({neighbor->fCost, neighbor});
             }
         }
     }

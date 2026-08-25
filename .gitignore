@@ -7,9 +7,13 @@ PathfindingGame.dSYM/
 *.o
 *.obj
 *.exe
+build/
 
 # VS Code
 .vscode/
 
 # SFML / temp
 *.log
+
+# General
+Plans/
