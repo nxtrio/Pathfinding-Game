@@ -2,21 +2,48 @@
 #define PATHFINDINGGAME_H
 
 #include <SFML/Graphics.hpp>
-#include <vector>
-#include <queue>
-#include <cmath>
-#include <iostream>
-#include <stack>
-#include <unordered_map>
+#include <cstddef>
 #include <limits>
+#include <vector>
 
 // Constants for Grid
 const int ROW_COUNT = 30;
 const int COL_COUNT = 40;
 const int CELL_SIZE = 25;
 
-// Enum for Node State (Visual Representation)
-enum NodeType { EMPTY, WALL, START, END, VISITED, PATH, FRONTIER, OBSTACLE };
+// Enum for permanent/logical node state
+enum NodeType { EMPTY, PLAYER_PATH, START, END, OBSTACLE };
+
+enum SearchStepType { DISCOVERED, EXPANDED };
+
+struct GridPosition {
+    int x;
+    int y;
+
+    bool operator==(const GridPosition& other) const {
+        return x == other.x && y == other.y;
+    }
+};
+
+struct SearchStep {
+    GridPosition position;
+    SearchStepType type;
+};
+
+struct SearchMetrics {
+    bool found = false;
+    int pathLength = -1;
+    std::size_t discoveredNodes = 0;
+    std::size_t expandedNodes = 0;
+    std::size_t maxFrontierSize = 0;
+    long long singleRunMicroseconds = 0;
+};
+
+struct SearchResult {
+    std::vector<SearchStep> steps;
+    std::vector<GridPosition> path;
+    SearchMetrics metrics;
+};
 
 // --- 1. The Node Class ---
 // Represents a single square on the grid.
@@ -57,23 +84,14 @@ public:
             case EMPTY:
                 shape.setFillColor(sf::Color::White);
                 break;
-            case WALL:
-                shape.setFillColor(sf::Color(50, 50, 50)); // dark grey
+            case PLAYER_PATH:
+                shape.setFillColor(sf::Color(50, 50, 50)); // dark grey player route
                 break;
             case START:
                 shape.setFillColor(sf::Color::Green);
                 break;
             case END:
                 shape.setFillColor(sf::Color::Red);
-                break;
-            case VISITED:
-                shape.setFillColor(sf::Color(100, 200, 255)); // light blue
-                break;
-            case PATH:
-                shape.setFillColor(sf::Color::Yellow);
-                break;
-            case FRONTIER:
-                shape.setFillColor(sf::Color(100, 255, 100)); // light green
                 break;
             case OBSTACLE:
                 // permanent obstacle – purple-ish so it stands out
@@ -84,10 +102,6 @@ public:
 
     // Reset costs for a new run
     void resetPathData() {
-        // Don’t clear WALL, START, END, or OBSTACLE
-        if (type != WALL && type != START && type != END && type != OBSTACLE) {
-            setType(EMPTY);
-        }
         gCost = std::numeric_limits<double>::infinity();
         hCost = 0.0;
         fCost = std::numeric_limits<double>::infinity();
@@ -100,28 +114,28 @@ class Pathfinder {
 public:
     virtual ~Pathfinder() = default; // we delete via base pointer
 
-    virtual void solve(std::vector<std::vector<GridNode*>>& grid,
-                       GridNode* start,
-                       GridNode* end,
-                       std::vector<GridNode*>& nodesToAnimate) = 0;
+    virtual SearchResult solve(std::vector<std::vector<GridNode*>>& grid,
+                               GridNode* start,
+                               GridNode* end,
+                               bool captureSteps = true) = 0;
 };
 
 // --- 3. Concrete Implementation: Dijkstra ---
 class Dijkstra : public Pathfinder {
 public:
-    void solve(std::vector<std::vector<GridNode*>>& grid,
-               GridNode* start,
-               GridNode* end,
-               std::vector<GridNode*>& nodesToAnimate) override;
+    SearchResult solve(std::vector<std::vector<GridNode*>>& grid,
+                       GridNode* start,
+                       GridNode* end,
+                       bool captureSteps = true) override;
 };
 
 // --- 4. Concrete Implementation: A* ---
 class AStar : public Pathfinder {
 public:
-    void solve(std::vector<std::vector<GridNode*>>& grid,
-               GridNode* start,
-               GridNode* end,
-               std::vector<GridNode*>& nodesToAnimate) override;
+    SearchResult solve(std::vector<std::vector<GridNode*>>& grid,
+                       GridNode* start,
+                       GridNode* end,
+                       bool captureSteps = true) override;
 };
 
 #endif

@@ -22,3 +22,17 @@ add_custom_command(TARGET PathfindingGame POST_BUILD
             "$<TARGET_FILE_DIR:PathfindingGame>/assets"
     COMMENT "Copying game assets"
 )
+
+include(CTest)
+
+if(BUILD_TESTING)
+    add_executable(PathfindingGameTests
+        tests/PathfindingGameTests.cpp
+        src/PathfindingGame.cpp
+    )
+
+    target_include_directories(PathfindingGameTests PRIVATE include)
+    target_link_libraries(PathfindingGameTests PRIVATE SFML::Graphics)
+
+    add_test(NAME PathfindingGameAlgorithms COMMAND PathfindingGameTests)
+endif()

@@ -27,7 +27,7 @@ void generateObstacles(std::vector<std::vector<GridNode*>>& grid,
     markColumnWithGap(3 * COL_COUNT / 4, 2 * ROW_COUNT / 3);
 }
 
-// BFS that walks ONLY along hand-drawn path cells (START/WALL/END).
+// BFS that walks ONLY along hand-drawn path cells (START/PLAYER_PATH/END).
 // Returns number of steps from start to end, or -1 if not connected.
 int computeHandDrawnPathLength(const std::vector<std::vector<GridNode*>>& grid,
                                GridNode* startNode,
@@ -48,7 +48,7 @@ int computeHandDrawnPathLength(const std::vector<std::vector<GridNode*>>& grid,
     q.push({sy, sx});
 
     auto canWalk = [&](GridNode* n) -> bool {
-        return (n->type == START || n->type == WALL || n->type == END);
+        return (n->type == START || n->type == PLAYER_PATH || n->type == END);
     };
 
     while (!q.empty()) {
@@ -101,7 +101,11 @@ void editGridLine(std::vector<std::vector<GridNode*>>& grid,
     while (true) {
         if (x >= 0 && x < COL_COUNT && y >= 0 && y < ROW_COUNT) {
             GridNode* n = grid[y][x];
-            if (n != startNode && n != endNode && n->type != OBSTACLE) {
+            bool canDraw = editType == PLAYER_PATH &&
+                           (n->type == EMPTY || n->type == PLAYER_PATH);
+            bool canErase = editType == EMPTY && n->type == PLAYER_PATH;
+            if (n != startNode && n != endNode && n->type != OBSTACLE &&
+                (canDraw || canErase)) {
                 n->setType(editType);
             }
         }
@@ -187,7 +191,7 @@ int main() {
             sf::Vector2i pos = sf::Mouse::getPosition(window);
             int x = pos.x / CELL_SIZE;
             int y = pos.y / CELL_SIZE;
-            NodeType editType = rightPressed ? EMPTY : WALL;
+            NodeType editType = rightPressed ? EMPTY : PLAYER_PATH;
 
             if (pos.x >= 0 && pos.y >= 0 &&
                 x < COL_COUNT && y < ROW_COUNT) {

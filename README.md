@@ -21,30 +21,32 @@ When your hand-drawn path successfully connects start to end, the game detects i
   - **Start** (green square)
   - **End** (red square)
   - **Obstacle** (purple columns) – pre-generated and **cannot** be edited by the user.
-  - **Wall** (dark grey) – user-drawn path segments.
+  - **Player path** (dark grey) – user-drawn, traversable route segments.
   - **Empty** (white) – open space.
 
 - **Hand-drawn path detection**
 
-  - As you draw walls, the game runs a BFS over the grid to see if your **walls + start + end** form a continuous path.
+  - As you draw a route, the game runs a BFS over the grid to see if your **player path + start + end** form a continuous path.
   - Once a path exists, the game displays the path length in the HUD and then exits.
 
 - **Pathfinding algorithms (in code)**
 
   - `Dijkstra` and `AStar` classes are implemented in `PathfindingGame.cpp` and operate over the same `GridNode` grid.
+  - Each run returns a deterministic `SearchResult` containing trace events, the reconstructed optimal path, and search metrics.
+  - Player-path cells remain traversable; only permanent obstacles block the algorithms.
   - They are not currently hooked up to the main game loop or renderer, but are available for future visualization / comparison features.
 
 ---
 
 ## Controls
 
-- **Left mouse button** – draw a wall on the hovered cell  
+- **Left mouse button** – draw the player path on the hovered cell
   (not allowed on Start, End, or Obstacle cells).
 
-- **Right mouse button** – erase a wall  
+- **Right mouse button** – erase the player path
   (not allowed on Start, End, or Obstacle cells).
 
-- When your walls create a continuous path from **start** to **end**, the game:
+- When your route creates a continuous path from **start** to **end**, the game:
 
   - Computes the path length (number of steps),
   - Updates the HUD text,
@@ -65,6 +67,7 @@ Configure, build, and run the game from the repository root:
 ```bash
 cmake -S . -B build
 cmake --build build
+ctest --test-dir build --output-on-failure
 ./build/PathfindingGame
 ```
 
@@ -80,7 +83,7 @@ Each cell in the grid is represented by:
 class GridNode {
 public:
     int x, y;
-    NodeType type;           // EMPTY, WALL, START, END, VISITED, PATH, FRONTIER, OBSTACLE
+    NodeType type;           // EMPTY, PLAYER_PATH, START, END, OBSTACLE
     double gCost, hCost, fCost;
     GridNode* parent;
     sf::RectangleShape shape;
