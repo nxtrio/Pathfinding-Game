@@ -88,6 +88,46 @@ std::string formatHudText(GameState state,
     return "Path length: N/A\nSpace: Compare algorithms";
 }
 
+void drawComparisonLegend(sf::RenderTarget& target, const sf::Font& font) {
+    const sf::Vector2f origin(
+        static_cast<float>(COL_COUNT * CELL_SIZE - 245),
+        static_cast<float>(ROW_COUNT * CELL_SIZE - 120)
+    );
+    sf::RectangleShape background(sf::Vector2f(235.f, 110.f));
+    background.setPosition(origin);
+    background.setFillColor(sf::Color(15, 18, 28, 220));
+    background.setOutlineColor(sf::Color(220, 225, 240, 180));
+    background.setOutlineThickness(1.f);
+    target.draw(background);
+
+    const std::string labels[] = {
+        "Dijkstra only", "A* only", "Both explored", "Optimal path"
+    };
+    const sf::Color colors[] = {
+        comparisonCellColor(DIJKSTRA_ONLY),
+        comparisonCellColor(ASTAR_ONLY),
+        comparisonCellColor(BOTH_EXPANDED),
+        comparisonPathColor(SHARED_PATH)
+    };
+
+    for (int i = 0; i < 4; ++i) {
+        float y = origin.y + 11.f + static_cast<float>(i * 24);
+        sf::RectangleShape swatch(
+            i == 3 ? sf::Vector2f(18.f, 5.f) : sf::Vector2f(18.f, 14.f)
+        );
+        swatch.setPosition(sf::Vector2f(
+            origin.x + 12.f, y + (i == 3 ? 5.f : 0.f)
+        ));
+        swatch.setFillColor(colors[i]);
+        target.draw(swatch);
+
+        sf::Text label(font, labels[i], 14);
+        label.setPosition(sf::Vector2f(origin.x + 40.f, y - 3.f));
+        label.setFillColor(sf::Color::White);
+        target.draw(label);
+    }
+}
+
 // Generate some non-trivial permanent obstacles
 void generateObstacles(std::vector<std::vector<GridNode*>>& grid,
                        GridNode* startNode,
@@ -405,6 +445,7 @@ int main() {
             } else if (gameState == HOLDING_ASTAR) {
                 animation.holdElapsed += animationElapsed;
                 if (animation.holdElapsed >= 0.75f) {
+                    applyComparisonOverlay(grid, comparisonResults);
                     gameState = comparisonResults.status == BOTH_NO_PATH
                         ? NO_PATH_RESULT
                         : COMPARISON_COMPLETE;
@@ -430,6 +471,11 @@ int main() {
             for (int x = 0; x < COL_COUNT; ++x) {
                 window.draw(grid[y][x]->shape);
             }
+        }
+        if (gameState == COMPARISON_COMPLETE ||
+            gameState == NO_PATH_RESULT) {
+            drawComparisonPaths(window, comparisonResults);
+            drawComparisonLegend(window, font);
         }
         window.draw(pathText);
         window.display();

@@ -392,6 +392,89 @@ void testAnimationReplayAndLogicalStateSafety() {
             "animation speed must clamp at its maximum");
 }
 
+void testFinalComparisonOverlayAndPathSegments() {
+    TestGrid grid(1, 5);
+    grid.nodes[0][0]->setType(START);
+    grid.nodes[0][1]->setType(PLAYER_PATH);
+    grid.nodes[0][4]->setType(END);
+
+    std::vector<NodeType> originalTypes;
+    for (GridNode* node : grid.nodes[0]) originalTypes.push_back(node->type);
+
+    AlgorithmComparison comparison;
+    comparison.available = true;
+    comparison.status = MATCHING_PATHS;
+    comparison.dijkstra.steps = {
+        {{1, 0}, DISCOVERED},
+        {{1, 0}, EXPANDED},
+        {{2, 0}, EXPANDED},
+        {{4, 0}, DISCOVERED}
+    };
+    comparison.astar.steps = {
+        {{2, 0}, EXPANDED},
+        {{3, 0}, EXPANDED}
+    };
+
+    ComparisonOverlay overlay = buildComparisonOverlay(comparison, 1, 5);
+    require(overlay[0][0] == NOT_EXPANDED,
+            "unexpanded cell must retain its base visual");
+    require(overlay[0][1] == DIJKSTRA_ONLY,
+            "Dijkstra-only expansion must be classified");
+    require(overlay[0][2] == BOTH_EXPANDED,
+            "shared expansion must be classified");
+    require(overlay[0][3] == ASTAR_ONLY,
+            "A*-only expansion must be classified");
+    require(overlay[0][4] == NOT_EXPANDED,
+            "discovery without expansion must not enter the final overlay");
+
+    grid.nodes[0][1]->shape.setFillColor(sf::Color::Magenta);
+    applyComparisonOverlay(grid.nodes, comparison);
+    require(grid.nodes[0][1]->shape.getFillColor() ==
+                comparisonCellColor(DIJKSTRA_ONLY),
+            "final overlay must replace the terminal animation frame");
+    require(grid.nodes[0][2]->shape.getFillColor() ==
+                comparisonCellColor(BOTH_EXPANDED),
+            "shared cells must use the shared overlay color");
+    require(grid.nodes[0][3]->shape.getFillColor() ==
+                comparisonCellColor(ASTAR_ONLY),
+            "A*-only cells must use the A* overlay color");
+    require(grid.nodes[0][0]->shape.getFillColor() == sf::Color::Green &&
+            grid.nodes[0][4]->shape.getFillColor() == sf::Color::Red,
+            "final overlay must preserve start and target visuals");
+    for (std::size_t x = 0; x < grid.nodes[0].size(); ++x) {
+        require(grid.nodes[0][x]->type == originalTypes[x],
+                "final overlay must not mutate logical node state");
+    }
+
+    SearchResult dijkstra;
+    SearchResult astar;
+    dijkstra.path = {{0, 0}, {1, 0}, {2, 0}, {2, 1}};
+    astar.path = {{0, 0}, {1, 0}, {1, 1}, {2, 1}};
+    std::vector<ComparisonPathSegment> segments =
+        buildComparisonPathSegments(dijkstra, astar);
+
+    int sharedCount = 0;
+    int dijkstraOnlyCount = 0;
+    int astarOnlyCount = 0;
+    for (const ComparisonPathSegment& segment : segments) {
+        if (segment.state == SHARED_PATH) ++sharedCount;
+        if (segment.state == DIJKSTRA_PATH_ONLY) ++dijkstraOnlyCount;
+        if (segment.state == ASTAR_PATH_ONLY) ++astarOnlyCount;
+    }
+    require(sharedCount == 1 && dijkstraOnlyCount == 2 &&
+            astarOnlyCount == 2,
+            "divergent optimal paths must distinguish shared and unique lines");
+
+    astar.path = dijkstra.path;
+    segments = buildComparisonPathSegments(dijkstra, astar);
+    require(segments.size() == dijkstra.path.size() - 1,
+            "identical paths must render each segment only once");
+    for (const ComparisonPathSegment& segment : segments) {
+        require(segment.state == SHARED_PATH,
+                "identical paths must render as one neutral bright line");
+    }
+}
+
 int main() {
     try {
         testStandardMapOptimalityAndMetrics();
@@ -399,6 +482,7 @@ int main() {
         testRepeatedDeterministicRuns();
         testNoPathAndStaleParentReset();
         testAnimationReplayAndLogicalStateSafety();
+        testFinalComparisonOverlayAndPathSegments();
     } catch (const std::exception& error) {
         std::cerr << "PathfindingGameTests failed: " << error.what() << '\n';
         return 1;

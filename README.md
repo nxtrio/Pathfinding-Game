@@ -36,6 +36,7 @@ When your hand-drawn path successfully connects start to end, the game keeps its
   - Player-path cells remain traversable; only permanent obstacles block the algorithms.
   - Pressing Space animates Dijkstra and then A* on the same board while keeping both results available in the HUD.
   - Frontier, expanded, and final-path states use distinct colors for each algorithm.
+  - The final overlay distinguishes Dijkstra-only, A*-only, and shared expanded cells, then draws the optimal route as a continuous line above the grid.
 
 ---
 
