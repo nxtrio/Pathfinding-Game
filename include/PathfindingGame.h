@@ -4,6 +4,7 @@
 #include <SFML/Graphics.hpp>
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <vector>
 
 // Grid cells keep a stable size in world coordinates. Active dimensions come
@@ -133,6 +134,11 @@ Grid createGrid(int rows, int cols);
 void destroyGrid(Grid& grid);
 // On success, all pointers into the previous grid are invalidated.
 void recreateGrid(Grid& grid, int rows, int cols);
+
+std::optional<GridPosition> worldToGridPosition(
+    const Grid& grid,
+    sf::Vector2f worldPosition
+);
 
 int computeHandDrawnPathLength(const Grid& grid,
                                GridNode* startNode,

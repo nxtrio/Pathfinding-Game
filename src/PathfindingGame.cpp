@@ -47,6 +47,25 @@ void recreateGrid(Grid& grid, int rows, int cols) {
     grid = std::move(replacement);
 }
 
+std::optional<GridPosition> worldToGridPosition(
+    const Grid& grid,
+    sf::Vector2f worldPosition
+) {
+    int x = static_cast<int>(std::floor(
+        worldPosition.x / static_cast<float>(CELL_SIZE)
+    ));
+    int y = static_cast<int>(std::floor(
+        worldPosition.y / static_cast<float>(CELL_SIZE)
+    ));
+
+    if (y < 0 || y >= static_cast<int>(grid.size()) || x < 0 ||
+        x >= static_cast<int>(grid[y].size())) {
+        return std::nullopt;
+    }
+
+    return GridPosition{x, y};
+}
+
 int computeHandDrawnPathLength(const Grid& grid,
                                GridNode* startNode,
                                GridNode* endNode) {

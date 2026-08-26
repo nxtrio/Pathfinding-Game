@@ -112,6 +112,28 @@ std::string percentage(double value) {
     return text.str();
 }
 
+std::string mapSummary(const MapConfig& config) {
+    std::string summary;
+    switch (config.type) {
+        case CLASSIC_MAP:
+            summary = "CLASSIC";
+            break;
+        case GROWING_TREE_MAZE:
+            summary = "GROWING TREE";
+            break;
+        case RECURSIVE_DIVISION_MAZE:
+            summary = "RECURSIVE DIVISION";
+            break;
+    }
+
+    summary += " | " + std::to_string(config.cols) + " x " +
+        std::to_string(config.rows);
+    if (config.type != CLASSIC_MAP) {
+        summary += " | SEED " + std::to_string(config.seed);
+    }
+    return summary;
+}
+
 void drawMetricRow(sf::RenderTarget& target,
                    const sf::Font& font,
                    const std::string& label,
@@ -334,6 +356,7 @@ ComparisonPanelText buildComparisonPanelText(
 
 void drawComparisonPanel(sf::RenderTarget& target,
                          const sf::Font& font,
+                         const MapConfig& mapConfig,
                          GameState state,
                          int playerPathLength,
                          const AlgorithmComparison& comparison,
@@ -353,7 +376,7 @@ void drawComparisonPanel(sf::RenderTarget& target,
 
     drawText(target, font, "PATHFINDING LAB", 22,
              sf::Vector2f(PANEL_X + 18.f, 14.f));
-    drawText(target, font, "PLAYER vs DIJKSTRA vs A*", 11,
+    drawText(target, font, mapSummary(mapConfig), 9,
              sf::Vector2f(PANEL_X + 19.f, 43.f), SECONDARY_TEXT);
 
     drawCard(target, sf::Vector2f(PANEL_X + 18.f, 70.f),
@@ -460,8 +483,10 @@ void drawComparisonPanel(sf::RenderTarget& target,
     drawText(target, font,
              "Dijkstra: cost-so-far\n"
              "A*: cost + Manhattan estimate\n"
+             "Wheel zoom | Middle drag pan | F fit\n"
              "Left/right drag: draw/erase\n"
              "Space compare | P pause | -/+ speed\n"
-             "R reset | C clear | Esc cancel",
-             11, sf::Vector2f(PANEL_X + 18.f, 657.f), SECONDARY_TEXT);
+             "R reset | C clear | Esc cancel\n"
+             "N new map | M map selection",
+             10, sf::Vector2f(PANEL_X + 18.f, 649.f), SECONDARY_TEXT);
 }

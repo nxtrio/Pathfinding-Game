@@ -1,16 +1,17 @@
 #include "PathfindingGame.h"
 #include "PathfindingAnimation.h"
 #include "ComparisonUI.h"
+#include "MapGeneration.h"
+#include "MapSelectionUI.h"
 
 #include <cmath>
 #include <iostream>
+#include <queue>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
-
-constexpr int CLASSIC_ROWS = 30;
-constexpr int CLASSIC_COLS = 40;
 
 class TestGrid {
 public:
@@ -35,7 +36,7 @@ int positionKey(const GridPosition& position, int cols) {
     return position.y * cols + position.x;
 }
 
-void validatePath(const TestGrid& grid,
+void validatePath(const Grid& grid,
                   GridNode* start,
                   GridNode* end,
                   const SearchResult& result) {
@@ -51,12 +52,12 @@ void validatePath(const TestGrid& grid,
     for (std::size_t i = 0; i < result.path.size(); ++i) {
         const GridPosition& position = result.path[i];
         require(position.y >= 0 &&
-                position.y < static_cast<int>(grid.nodes.size()),
+                position.y < static_cast<int>(grid.size()),
                 "path row is outside the grid");
         require(position.x >= 0 &&
-                position.x < static_cast<int>(grid.nodes[position.y].size()),
+                position.x < static_cast<int>(grid[position.y].size()),
                 "path column is outside the grid");
-        require(grid.nodes[position.y][position.x]->type != OBSTACLE,
+        require(grid[position.y][position.x]->type != OBSTACLE,
                 "path must not enter an obstacle");
 
         if (i > 0) {
@@ -132,46 +133,418 @@ bool stableResultMatches(const SearchResult& a, const SearchResult& b) {
     return true;
 }
 
-void addStandardObstacles(TestGrid& grid,
-                          GridNode* start,
-                          GridNode* end) {
-    auto markColumnWithGap = [&](int col, int gapRow) {
-        for (int y = 0; y < static_cast<int>(grid.nodes.size()); ++y) {
-            GridNode* node = grid.nodes[y][col];
-            if (node == start || node == end || y == gapRow) continue;
-            node->setType(OBSTACLE);
+std::vector<NodeType> captureNodeTypes(const Grid& grid) {
+    std::vector<NodeType> types;
+    for (const auto& row : grid) {
+        for (GridNode* node : row) types.push_back(node->type);
+    }
+    return types;
+}
+
+bool obstacleLayoutsMatch(const Grid& left, const Grid& right) {
+    if (left.size() != right.size()) return false;
+    for (std::size_t y = 0; y < left.size(); ++y) {
+        if (left[y].size() != right[y].size()) return false;
+        for (std::size_t x = 0; x < left[y].size(); ++x) {
+            if ((left[y][x]->type == OBSTACLE) !=
+                (right[y][x]->type == OBSTACLE)) {
+                return false;
+            }
         }
+    }
+    return true;
+}
+
+std::size_t reachablePassageCount(const Grid& grid, GridPosition start) {
+    std::vector<std::vector<bool>> visited;
+    visited.reserve(grid.size());
+    for (const auto& row : grid) {
+        visited.emplace_back(row.size(), false);
+    }
+
+    std::queue<GridPosition> frontier;
+    frontier.push(start);
+    visited[start.y][start.x] = true;
+    std::size_t reachable = 0;
+    constexpr int DX[4] = {1, -1, 0, 0};
+    constexpr int DY[4] = {0, 0, 1, -1};
+
+    while (!frontier.empty()) {
+        GridPosition current = frontier.front();
+        frontier.pop();
+        ++reachable;
+
+        for (int direction = 0; direction < 4; ++direction) {
+            int nextX = current.x + DX[direction];
+            int nextY = current.y + DY[direction];
+            if (nextY < 0 || nextY >= static_cast<int>(grid.size()) ||
+                nextX < 0 ||
+                nextX >= static_cast<int>(grid[nextY].size()) ||
+                visited[nextY][nextX] ||
+                grid[nextY][nextX]->type == OBSTACLE) {
+                continue;
+            }
+            visited[nextY][nextX] = true;
+            frontier.push({nextX, nextY});
+        }
+    }
+
+    return reachable;
+}
+
+void validateGrowingTreeMap(const LoadedMap& map) {
+    const int rows = map.config.rows;
+    const int cols = map.config.cols;
+    require(rows >= 11 && cols >= 11 && rows % 2 == 1 && cols % 2 == 1,
+            "Growing Tree maps must retain valid odd dimensions");
+    require(map.startNode != nullptr && map.endNode != nullptr &&
+            map.startNode != map.endNode &&
+            map.startNode->type == START && map.endNode->type == END,
+            "Growing Tree maps must contain distinct endpoints");
+    require(map.startNode->x > 0 && map.startNode->x < cols - 1 &&
+            map.startNode->y > 0 && map.startNode->y < rows - 1 &&
+            map.endNode->x > 0 && map.endNode->x < cols - 1 &&
+            map.endNode->y > 0 && map.endNode->y < rows - 1,
+            "Growing Tree endpoints must remain inside the obstacle border");
+    require(map.startNode->x % 2 == 1 && map.startNode->y % 2 == 1 &&
+            map.endNode->x % 2 == 1 && map.endNode->y % 2 == 1,
+            "Growing Tree endpoints must lie on logical maze cells");
+
+    std::size_t passageCount = 0;
+    for (int y = 0; y < rows; ++y) {
+        for (int x = 0; x < cols; ++x) {
+            NodeType type = map.grid[y][x]->type;
+            require(type == EMPTY || type == OBSTACLE ||
+                    type == START || type == END,
+                    "fresh Growing Tree maps must use only permanent types");
+            if (y == 0 || y == rows - 1 || x == 0 || x == cols - 1) {
+                require(type == OBSTACLE,
+                        "Growing Tree maps must preserve an obstacle border");
+            }
+            if (type != OBSTACLE) {
+                require(!(x % 2 == 0 && y % 2 == 0),
+                        "Growing Tree must not carve even/even intersections");
+                ++passageCount;
+            }
+        }
+    }
+
+    std::size_t logicalCells = static_cast<std::size_t>((rows - 1) / 2) *
+                               static_cast<std::size_t>((cols - 1) / 2);
+    require(passageCount == 2 * logicalCells - 1,
+            "Growing Tree newest-cell carving must produce a perfect maze");
+    require(reachablePassageCount(
+                map.grid, {map.startNode->x, map.startNode->y}
+            ) == passageCount,
+            "every Growing Tree passage must be connected");
+}
+
+void validateRecursiveDivisionMap(const LoadedMap& map) {
+    const int rows = map.config.rows;
+    const int cols = map.config.cols;
+    require(rows >= 11 && cols >= 11 && rows % 2 == 1 && cols % 2 == 1,
+            "Recursive Division maps must retain valid odd dimensions");
+    require(map.startNode != nullptr && map.endNode != nullptr &&
+            map.startNode != map.endNode &&
+            map.startNode->type == START && map.endNode->type == END,
+            "Recursive Division maps must contain distinct endpoints");
+    require(map.startNode->x % 2 == 1 && map.startNode->y % 2 == 1 &&
+            map.endNode->x % 2 == 1 && map.endNode->y % 2 == 1,
+            "Recursive Division endpoints must lie on logical maze cells");
+
+    std::size_t passageCount = 0;
+    for (int y = 0; y < rows; ++y) {
+        for (int x = 0; x < cols; ++x) {
+            NodeType type = map.grid[y][x]->type;
+            require(type == EMPTY || type == OBSTACLE ||
+                    type == START || type == END,
+                    "fresh Recursive Division maps must use permanent types");
+            if (y == 0 || y == rows - 1 || x == 0 || x == cols - 1) {
+                require(type == OBSTACLE,
+                        "Recursive Division must preserve an obstacle border");
+            }
+            if (x % 2 == 1 && y % 2 == 1) {
+                require(type != OBSTACLE,
+                        "Recursive Division walls must use even coordinates");
+            }
+            if (type != OBSTACLE) {
+                require(!(x % 2 == 0 && y % 2 == 0),
+                        "Recursive Division gaps must use odd coordinates");
+                ++passageCount;
+            }
+        }
+    }
+
+    std::size_t logicalCells = static_cast<std::size_t>((rows - 1) / 2) *
+                               static_cast<std::size_t>((cols - 1) / 2);
+    require(passageCount == 2 * logicalCells - 1,
+            "Recursive Division must produce a perfect maze raster");
+    require(reachablePassageCount(
+                map.grid, {map.startNode->x, map.startNode->y}
+            ) == passageCount,
+            "every Recursive Division passage must be connected");
+}
+
+void testClassicMapModelAndReplacement() {
+    MapConfig config = classicMapConfig();
+    require(config.type == CLASSIC_MAP && config.name == "Classic" &&
+            config.rows == 30 && config.cols == 40 && config.seed == 0 &&
+            config.start == GridPosition{5, 5} &&
+            config.end == GridPosition{25, 15},
+            "Classic config must preserve original map metadata");
+
+    LoadedMap map = createMap(config);
+    require(map.grid.size() == 30 && map.grid.front().size() == 40,
+            "Classic factory must construct the original dimensions");
+    require(map.startNode == map.grid[5][5] &&
+            map.endNode == map.grid[15][25] &&
+            map.startNode->type == START && map.endNode->type == END,
+            "Classic factory must bind the original endpoints");
+
+    std::size_t obstacleCount = 0;
+    for (int y = 0; y < config.rows; ++y) {
+        for (int x = 0; x < config.cols; ++x) {
+            bool classicBarrier =
+                (x == 10 && y != 10) ||
+                (x == 20 && y != 15) ||
+                (x == 30 && y != 20);
+            GridNode* node = map.grid[y][x];
+            if (classicBarrier) {
+                require(node->type == OBSTACLE,
+                        "Classic barrier layout must remain unchanged");
+                ++obstacleCount;
+            } else if (node != map.startNode && node != map.endNode) {
+                require(node->type == EMPTY,
+                        "Classic non-barrier cells must begin empty");
+            }
+        }
+    }
+    require(obstacleCount == 87,
+            "Classic map must retain three 29-cell obstacle columns");
+
+    map.grid[5][6]->setType(PLAYER_PATH);
+    LoadedMap replacement = createMap(config);
+    GridNode* replacementStart = replacement.startNode;
+    map = std::move(replacement);
+    require(map.startNode == replacementStart &&
+            map.grid[5][6]->type == EMPTY && replacement.grid.empty() &&
+            replacement.startNode == nullptr && replacement.endNode == nullptr,
+            "map replacement must transfer ownership and fresh logical state");
+
+    MapConfig invalidClassic = config;
+    invalidClassic.rows = 31;
+    bool invalidClassicRejected = false;
+    try {
+        createMap(invalidClassic);
+    } catch (const std::invalid_argument&) {
+        invalidClassicRejected = true;
+    }
+    require(invalidClassicRejected,
+            "Classic factory must reject dimensions that change its identity");
+}
+
+void testMapSelectionModelAndActions() {
+    require(dimensionsForPreset(SMALL_MAP_SIZE).rows == 21 &&
+            dimensionsForPreset(SMALL_MAP_SIZE).cols == 31 &&
+            dimensionsForPreset(MEDIUM_MAP_SIZE).rows == 35 &&
+            dimensionsForPreset(MEDIUM_MAP_SIZE).cols == 51 &&
+            dimensionsForPreset(LARGE_MAP_SIZE).rows == 55 &&
+            dimensionsForPreset(LARGE_MAP_SIZE).cols == 81,
+            "map selector must expose all three odd-sized maze presets");
+
+    MapSelectionState selection;
+    MapConfig config = mapConfigForSelection(selection);
+    require(config.type == CLASSIC_MAP && config.rows == 30 &&
+            config.cols == 40 && config.seed == 0,
+            "default selection must launch the original Classic map");
+
+    selection.selectedType = GROWING_TREE_MAZE;
+    selection.selectedSize = SMALL_MAP_SIZE;
+    selection.seed = 12345u;
+    config = mapConfigForSelection(selection);
+    require(config.type == GROWING_TREE_MAZE && config.rows == 21 &&
+            config.cols == 31 && config.seed == 12345u,
+            "Growing Tree selection must preserve preset and displayed seed");
+
+    selection.selectedType = RECURSIVE_DIVISION_MAZE;
+    selection.selectedSize = LARGE_MAP_SIZE;
+    config = mapConfigForSelection(selection);
+    require(config.type == RECURSIVE_DIVISION_MAZE && config.rows == 55 &&
+            config.cols == 81 && config.seed == 12345u,
+            "Recursive Division selection must preserve preset and seed");
+
+    const std::pair<sf::Vector2f, MapSelectionAction> actions[] = {
+        {{100.f, 200.f}, SELECT_CLASSIC_ACTION},
+        {{500.f, 200.f}, SELECT_GROWING_TREE_ACTION},
+        {{900.f, 200.f}, SELECT_RECURSIVE_DIVISION_ACTION},
+        {{460.f, 480.f}, SELECT_SMALL_SIZE_ACTION},
+        {{605.f, 480.f}, SELECT_MEDIUM_SIZE_ACTION},
+        {{750.f, 480.f}, SELECT_LARGE_SIZE_ACTION},
+        {{500.f, 580.f}, RANDOMIZE_SEED_ACTION},
+        {{700.f, 580.f}, START_MAP_ACTION},
+        {{100.f, 700.f}, NO_MAP_SELECTION_ACTION}
+    };
+    for (const auto& [position, expected] : actions) {
+        require(mapSelectionActionAt(position) == expected,
+                "map selector click region returned the wrong action");
+    }
+}
+
+void testGrowingTreeMazeGeneration() {
+    const std::pair<int, int> sizes[] = {
+        {11, 11}, {21, 31}, {35, 51}, {55, 81}
     };
 
-    markColumnWithGap(CLASSIC_COLS / 4, CLASSIC_ROWS / 3);
-    markColumnWithGap(CLASSIC_COLS / 2, CLASSIC_ROWS / 2);
-    markColumnWithGap(3 * CLASSIC_COLS / 4, 2 * CLASSIC_ROWS / 3);
+    for (const auto& [rows, cols] : sizes) {
+        MapConfig config = growingTreeMapConfig(rows, cols, 482917u);
+        require(config.type == GROWING_TREE_MAZE &&
+                config.name == "Growing Tree Maze" &&
+                config.rows == rows && config.cols == cols &&
+                config.seed == 482917u,
+                "Growing Tree config must retain dimensions and seed");
+
+        LoadedMap map = createMap(config);
+        validateGrowingTreeMap(map);
+        auto selectedEndpoints = findDistantEndpoints(map.grid);
+        require(map.config.start == GridPosition{
+                    map.startNode->x, map.startNode->y
+                } &&
+                map.config.end == GridPosition{
+                    map.endNode->x, map.endNode->y
+                } &&
+                selectedEndpoints.first == map.config.start &&
+                selectedEndpoints.second == map.config.end,
+                "generated endpoint metadata must match loaded nodes");
+
+        AlgorithmComparison comparison = runAlgorithmComparison(
+            map.grid, map.startNode, map.endNode, false
+        );
+        require(comparison.status == MATCHING_PATHS &&
+                comparison.dijkstra.metrics.found &&
+                comparison.astar.metrics.found &&
+                comparison.dijkstra.metrics.pathLength ==
+                    comparison.astar.metrics.pathLength,
+                "both solvers must agree on every Growing Tree preset");
+    }
+
+    MapConfig deterministicConfig = growingTreeMapConfig(21, 31, 12345u);
+    LoadedMap first = createMap(deterministicConfig);
+    LoadedMap second = createMap(deterministicConfig);
+    require(captureNodeTypes(first.grid) == captureNodeTypes(second.grid),
+            "same Growing Tree dimensions and seed must reproduce all cells");
+    require(first.config.start == second.config.start &&
+            first.config.end == second.config.end,
+            "same Growing Tree seed must reproduce endpoint placement");
+
+    LoadedMap varied = createMap(growingTreeMapConfig(21, 31, 54321u));
+    require(!obstacleLayoutsMatch(first.grid, varied.grid),
+            "different Growing Tree seeds should vary the obstacle layout");
+
+    for (MapConfig invalid : {
+            growingTreeMapConfig(9, 11, 1u),
+            growingTreeMapConfig(20, 31, 1u),
+            growingTreeMapConfig(21, 30, 1u)}) {
+        bool rejected = false;
+        try {
+            createMap(invalid);
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        require(rejected,
+                "Growing Tree factory must reject small or even dimensions");
+    }
+}
+
+void testRecursiveDivisionMazeGeneration() {
+    const std::pair<int, int> sizes[] = {
+        {11, 11}, {21, 31}, {31, 21}, {35, 51}, {55, 81}
+    };
+
+    for (const auto& [rows, cols] : sizes) {
+        MapConfig config = recursiveDivisionMapConfig(rows, cols, 482917u);
+        require(config.type == RECURSIVE_DIVISION_MAZE &&
+                config.name == "Recursive Division Maze" &&
+                config.rows == rows && config.cols == cols &&
+                config.seed == 482917u,
+                "Recursive Division config must retain dimensions and seed");
+
+        LoadedMap map = createMap(config);
+        validateRecursiveDivisionMap(map);
+        auto selectedEndpoints = findDistantEndpoints(map.grid);
+        require(selectedEndpoints.first == map.config.start &&
+                selectedEndpoints.second == map.config.end,
+                "Recursive Division metadata must retain distant endpoints");
+
+        AlgorithmComparison comparison = runAlgorithmComparison(
+            map.grid, map.startNode, map.endNode, false
+        );
+        require(comparison.status == MATCHING_PATHS &&
+                comparison.dijkstra.metrics.found &&
+                comparison.astar.metrics.found &&
+                comparison.dijkstra.metrics.pathLength ==
+                    comparison.astar.metrics.pathLength,
+                "both solvers must agree on every Recursive Division preset");
+    }
+
+    MapConfig deterministicConfig = recursiveDivisionMapConfig(
+        21, 31, 12345u
+    );
+    LoadedMap first = createMap(deterministicConfig);
+    LoadedMap second = createMap(deterministicConfig);
+    require(captureNodeTypes(first.grid) == captureNodeTypes(second.grid) &&
+            first.config.start == second.config.start &&
+            first.config.end == second.config.end,
+            "same Recursive Division seed must reproduce map and endpoints");
+
+    LoadedMap varied = createMap(
+        recursiveDivisionMapConfig(21, 31, 54321u)
+    );
+    require(!obstacleLayoutsMatch(first.grid, varied.grid),
+            "different Recursive Division seeds should vary the layout");
+
+    LoadedMap growingTree = createMap(
+        growingTreeMapConfig(21, 31, 12345u)
+    );
+    require(!obstacleLayoutsMatch(first.grid, growingTree.grid),
+            "Recursive Division must be structurally distinct from Growing Tree");
+
+    for (MapConfig invalid : {
+            recursiveDivisionMapConfig(9, 11, 1u),
+            recursiveDivisionMapConfig(20, 31, 1u),
+            recursiveDivisionMapConfig(21, 30, 1u)}) {
+        bool rejected = false;
+        try {
+            createMap(invalid);
+        } catch (const std::invalid_argument&) {
+            rejected = true;
+        }
+        require(rejected,
+                "Recursive Division must reject small or even dimensions");
+    }
 }
 
 void testStandardMapOptimalityAndMetrics() {
-    TestGrid grid(CLASSIC_ROWS, CLASSIC_COLS);
-    GridNode* start = grid.nodes[5][5];
-    GridNode* end = grid.nodes[15][25];
-    start->setType(START);
-    end->setType(END);
-    addStandardObstacles(grid, start, end);
-    grid.nodes[5][6]->setType(PLAYER_PATH);
+    LoadedMap map = createMap(classicMapConfig());
+    Grid& grid = map.grid;
+    GridNode* start = map.startNode;
+    GridNode* end = map.endNode;
+    grid[5][6]->setType(PLAYER_PATH);
 
     std::vector<NodeType> originalTypes;
-    for (const auto& row : grid.nodes) {
+    for (const auto& row : grid) {
         for (GridNode* node : row) {
             originalTypes.push_back(node->type);
         }
     }
 
     AlgorithmComparison comparison = beginAlgorithmComparison(
-        grid.nodes, start, end
+        grid, start, end
     );
     require(!comparison.available,
             "comparison must wait for A* before reporting completion");
     require(comparison.dijkstra.metrics.found && comparison.astar.path.empty(),
             "staged comparison must retain Dijkstra before running A*");
-    completeAlgorithmComparison(comparison, grid.nodes, start, end);
+    completeAlgorithmComparison(comparison, grid, start, end);
     const SearchResult& dijkstraResult = comparison.dijkstra;
     const SearchResult& astarResult = comparison.astar;
 
@@ -182,15 +555,15 @@ void testStandardMapOptimalityAndMetrics() {
     validatePath(grid, start, end, astarResult);
     validateMetrics(dijkstraResult);
     validateMetrics(astarResult);
-    validateTrace(dijkstraResult, start, end, CLASSIC_COLS);
-    validateTrace(astarResult, start, end, CLASSIC_COLS);
+    validateTrace(dijkstraResult, start, end, map.config.cols);
+    validateTrace(astarResult, start, end, map.config.cols);
     require(dijkstraResult.metrics.pathLength == astarResult.metrics.pathLength,
             "Dijkstra and A* must find the same optimal length");
     require(start->hCost == 30.0,
             "A* must initialize the start Manhattan heuristic");
 
     std::size_t typeIndex = 0;
-    for (const auto& row : grid.nodes) {
+    for (const auto& row : grid) {
         for (GridNode* node : row) {
             require(node->type == originalTypes[typeIndex++],
                     "comparison must not mutate logical board state");
@@ -204,6 +577,20 @@ void testDynamicGridLifetimeEditingAndHandRoute() {
             "grid construction must honor requested dimensions");
     require(grid.nodes[34][50]->x == 50 && grid.nodes[34][50]->y == 34,
             "dynamic grid nodes must retain matching coordinates");
+
+    std::optional<GridPosition> mappedPosition = worldToGridPosition(
+        grid.nodes, sf::Vector2f(1262.5f, 862.5f)
+    );
+    require(mappedPosition.has_value() &&
+            *mappedPosition == GridPosition{50, 34},
+            "world coordinates must map to the correct dynamic-grid cell");
+    require(!worldToGridPosition(
+                grid.nodes, sf::Vector2f(-0.1f, 12.5f)
+            ).has_value() &&
+            !worldToGridPosition(
+                grid.nodes, sf::Vector2f(1275.f, 862.5f)
+            ).has_value(),
+            "world-to-grid conversion must reject positions outside the map");
 
     GridNode* start = grid.nodes[34][0];
     GridNode* end = grid.nodes[34][50];
@@ -276,8 +663,8 @@ void testKnownPathLengthAndPlayerPathTraversability() {
 
     require(comparison.status == MATCHING_PATHS,
             "player-path comparison must report matching optimal paths");
-    validatePath(grid, start, end, dijkstraResult);
-    validatePath(grid, start, end, astarResult);
+    validatePath(grid.nodes, start, end, dijkstraResult);
+    validatePath(grid.nodes, start, end, astarResult);
     require(dijkstraResult.metrics.pathLength == 4,
             "known Dijkstra path length must be four edges");
     require(astarResult.metrics.pathLength == 4,
@@ -608,6 +995,127 @@ void testComparisonPanelModelAndActions() {
             "panel statement must remain correct when A* expands more");
 }
 
+void testAllMapIntegration() {
+    const std::vector<MapConfig> configs = {
+        classicMapConfig(),
+        growingTreeMapConfig(21, 31, 101u),
+        growingTreeMapConfig(35, 51, 202u),
+        growingTreeMapConfig(55, 81, 303u),
+        recursiveDivisionMapConfig(21, 31, 404u),
+        recursiveDivisionMapConfig(35, 51, 505u),
+        recursiveDivisionMapConfig(55, 81, 606u)
+    };
+
+    auto finishAnimation = [](Grid& grid,
+                              const SearchResult& result,
+                              bool dijkstra) {
+        AnimationController animation;
+        animation.speedIndex = 4;
+        bool finished = false;
+        for (int update = 0; update < 3 && !finished; ++update) {
+            finished = updateSearchAnimation(
+                grid, result, dijkstra, animation, 1000.f
+            );
+        }
+        return finished;
+    };
+
+    for (const MapConfig& config : configs) {
+        LoadedMap map = createMap(config);
+        AlgorithmComparison comparison = runAlgorithmComparison(
+            map.grid, map.startNode, map.endNode
+        );
+        require(comparison.available &&
+                comparison.status == MATCHING_PATHS &&
+                comparison.dijkstra.metrics.found &&
+                comparison.astar.metrics.found &&
+                comparison.dijkstra.metrics.pathLength ==
+                    comparison.astar.metrics.pathLength,
+                "every selectable map must produce matching solver results");
+        validatePath(
+            map.grid, map.startNode, map.endNode, comparison.dijkstra
+        );
+        validatePath(map.grid, map.startNode, map.endNode, comparison.astar);
+        validateMetrics(comparison.dijkstra);
+        validateMetrics(comparison.astar);
+
+        for (const GridPosition& position : comparison.dijkstra.path) {
+            GridNode* node = map.grid[position.y][position.x];
+            if (node != map.startNode && node != map.endNode) {
+                node->setType(PLAYER_PATH);
+            }
+        }
+        require(computeHandDrawnPathLength(
+                    map.grid, map.startNode, map.endNode
+                ) == comparison.dijkstra.metrics.pathLength,
+                "player route detection must work on every selectable map");
+
+        std::vector<NodeType> permanentTypes = captureNodeTypes(map.grid);
+        restoreGridColors(map.grid);
+        require(finishAnimation(map.grid, comparison.dijkstra, true),
+                "Dijkstra animation must finish on every selectable map");
+        restoreGridColors(map.grid);
+        require(finishAnimation(map.grid, comparison.astar, false),
+                "A* animation must finish on every selectable map");
+
+        ComparisonOverlay overlay = buildComparisonOverlay(
+            comparison, map.grid.size(), map.grid.front().size()
+        );
+        require(overlay.size() == map.grid.size(),
+                "comparison overlay must retain the active row count");
+        for (const auto& row : overlay) {
+            require(row.size() == map.grid.front().size(),
+                    "comparison overlay must retain the active column count");
+        }
+        applyComparisonOverlay(map.grid, comparison);
+        require(captureNodeTypes(map.grid) == permanentTypes,
+                "comparison overlay must not alter player or map state");
+
+        std::vector<ComparisonPathSegment> segments =
+            buildComparisonPathSegments(
+                comparison.dijkstra, comparison.astar
+            );
+        require(!segments.empty(),
+                "every selectable map must expose a final path overlay");
+        for (const ComparisonPathSegment& segment : segments) {
+            for (const GridPosition& position :
+                    {segment.start, segment.end}) {
+                require(position.y >= 0 &&
+                        position.y < static_cast<int>(map.grid.size()) &&
+                        position.x >= 0 &&
+                        position.x < static_cast<int>(
+                            map.grid[position.y].size()
+                        ),
+                        "final path overlay must stay within map dimensions");
+            }
+        }
+
+        AlgorithmComparison repeated = runAlgorithmComparison(
+            map.grid, map.startNode, map.endNode, false
+        );
+        require(repeated.status == MATCHING_PATHS &&
+                repeated.dijkstra.metrics.pathLength ==
+                    comparison.dijkstra.metrics.pathLength &&
+                repeated.astar.metrics.pathLength ==
+                    comparison.astar.metrics.pathLength,
+                "repeated comparison must remain stable on every map");
+
+        bool largestPreset = config.rows == 55 && config.cols == 81;
+        std::size_t warmupRuns = largestPreset ? 10 : 1;
+        std::size_t measuredRuns = largestPreset ? 200 : 7;
+        BenchmarkMetrics benchmark = benchmarkAlgorithms(
+            map.grid, map.startNode, map.endNode,
+            warmupRuns, measuredRuns
+        );
+        require(benchmark.available &&
+                benchmark.warmupRuns == warmupRuns &&
+                benchmark.measuredRuns == measuredRuns &&
+                benchmark.dijkstraMedianNanoseconds >= 0 &&
+                benchmark.astarMedianNanoseconds >= 0,
+                "benchmark must complete and report metrics on every map");
+    }
+}
+
 void testRepeatedBenchmark() {
     TestGrid grid(6, 6);
     GridNode* start = grid.nodes[0][0];
@@ -649,6 +1157,10 @@ void testRepeatedBenchmark() {
 
 int main() {
     try {
+        testClassicMapModelAndReplacement();
+        testMapSelectionModelAndActions();
+        testGrowingTreeMazeGeneration();
+        testRecursiveDivisionMazeGeneration();
         testStandardMapOptimalityAndMetrics();
         testDynamicGridLifetimeEditingAndHandRoute();
         testKnownPathLengthAndPlayerPathTraversability();
@@ -657,6 +1169,7 @@ int main() {
         testAnimationReplayAndLogicalStateSafety();
         testFinalComparisonOverlayAndPathSegments();
         testComparisonPanelModelAndActions();
+        testAllMapIntegration();
         testRepeatedBenchmark();
     } catch (const std::exception& error) {
         std::cerr << "PathfindingGameTests failed: " << error.what() << '\n';

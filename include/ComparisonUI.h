@@ -2,6 +2,7 @@
 #define COMPARISONUI_H
 
 #include "PathfindingAnimation.h"
+#include "MapGeneration.h"
 
 #include <string>
 
@@ -38,6 +39,7 @@ ComparisonPanelText buildComparisonPanelText(
 
 void drawComparisonPanel(sf::RenderTarget& target,
                          const sf::Font& font,
+                         const MapConfig& mapConfig,
                          GameState state,
                          int playerPathLength,
                          const AlgorithmComparison& comparison,

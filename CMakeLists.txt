@@ -11,6 +11,8 @@ find_package(SFML 3 REQUIRED COMPONENTS Graphics)
 add_executable(PathfindingGame
     src/ComparisonUI.cpp
     src/Main.cpp
+    src/MapGeneration.cpp
+    src/MapSelectionUI.cpp
     src/PathfindingAnimation.cpp
     src/PathfindingGame.cpp
 )
@@ -31,6 +33,8 @@ if(BUILD_TESTING)
     add_executable(PathfindingGameTests
         tests/PathfindingGameTests.cpp
         src/ComparisonUI.cpp
+        src/MapGeneration.cpp
+        src/MapSelectionUI.cpp
         src/PathfindingAnimation.cpp
         src/PathfindingGame.cpp
     )
