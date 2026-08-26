@@ -1,20 +1,27 @@
 #include "PathfindingGame.h"
 #include "PathfindingAnimation.h"
 #include "ComparisonUI.h"
-#include <cmath>
-#include <optional>
-#include <vector>
 #include <iostream>
-#include <queue>
+#include <optional>
+
+namespace {
+
+constexpr int CLASSIC_ROWS = 30;
+constexpr int CLASSIC_COLS = 40;
 
 // Generate some non-trivial permanent obstacles
-void generateObstacles(std::vector<std::vector<GridNode*>>& grid,
+void generateObstacles(Grid& grid,
                        GridNode* startNode,
                        GridNode* endNode)
 {
+    if (grid.empty() || grid.front().empty()) return;
+    const int rows = static_cast<int>(grid.size());
+    const int cols = static_cast<int>(grid.front().size());
+
     auto markColumnWithGap = [&](int col, int gapRow) {
-        if (col < 0 || col >= COL_COUNT) return;
-        for (int y = 0; y < ROW_COUNT; ++y) {
+        if (col < 0 || col >= cols) return;
+        for (int y = 0; y < rows; ++y) {
+            if (col >= static_cast<int>(grid[y].size())) continue;
             GridNode* n = grid[y][col];
             if (n == startNode || n == endNode) continue;
             if (y == gapRow) continue; // leave a gap to ensure a possible route
@@ -23,106 +30,12 @@ void generateObstacles(std::vector<std::vector<GridNode*>>& grid,
     };
 
     // Three vertical obstacle “walls” with staggered gaps so path has to snake around
-    markColumnWithGap(COL_COUNT / 4, ROW_COUNT / 3);
-    markColumnWithGap(COL_COUNT / 2, ROW_COUNT / 2);
-    markColumnWithGap(3 * COL_COUNT / 4, 2 * ROW_COUNT / 3);
+    markColumnWithGap(cols / 4, rows / 3);
+    markColumnWithGap(cols / 2, rows / 2);
+    markColumnWithGap(3 * cols / 4, 2 * rows / 3);
 }
 
-// BFS that walks ONLY along hand-drawn path cells (START/PLAYER_PATH/END).
-// Returns number of steps from start to end, or -1 if not connected.
-int computeHandDrawnPathLength(const std::vector<std::vector<GridNode*>>& grid,
-                               GridNode* startNode,
-                               GridNode* endNode)
-{
-    const int rows = ROW_COUNT;
-    const int cols = COL_COUNT;
-
-    std::vector<std::vector<int>> dist(rows, std::vector<int>(cols, -1));
-    std::queue<std::pair<int, int>> q;
-
-    int sx = startNode->x;
-    int sy = startNode->y;
-    int ex = endNode->x;
-    int ey = endNode->y;
-
-    dist[sy][sx] = 0;
-    q.push({sy, sx});
-
-    auto canWalk = [&](GridNode* n) -> bool {
-        return (n->type == START || n->type == PLAYER_PATH || n->type == END);
-    };
-
-    while (!q.empty()) {
-        auto [y, x] = q.front();
-        q.pop();
-
-        if (x == ex && y == ey) {
-            return dist[y][x];  // number of steps along hand-drawn path
-        }
-
-        const int dx[4] = { 1, -1, 0, 0 };
-        const int dy[4] = { 0, 0, 1, -1 };
-
-        for (int dir = 0; dir < 4; ++dir) {
-            int nx = x + dx[dir];
-            int ny = y + dy[dir];
-
-            if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
-            if (dist[ny][nx] != -1) continue;
-
-            GridNode* neighbor = grid[ny][nx];
-            if (!canWalk(neighbor)) continue;  // skip EMPTY / OBSTACLE / other types
-
-            dist[ny][nx] = dist[y][x] + 1;
-            q.push({ny, nx});
-        }
-    }
-
-    return -1; // not connected
-}
-
-// Draw or erase every cell between two sampled mouse positions.
-void editGridLine(std::vector<std::vector<GridNode*>>& grid,
-                  GridNode* startNode,
-                  GridNode* endNode,
-                  int startX,
-                  int startY,
-                  int endX,
-                  int endY,
-                  NodeType editType)
-{
-    int x = startX;
-    int y = startY;
-    int dx = std::abs(endX - startX);
-    int dy = std::abs(endY - startY);
-    int stepX = startX < endX ? 1 : -1;
-    int stepY = startY < endY ? 1 : -1;
-    int error = dx - dy;
-
-    while (true) {
-        if (x >= 0 && x < COL_COUNT && y >= 0 && y < ROW_COUNT) {
-            GridNode* n = grid[y][x];
-            bool canDraw = editType == PLAYER_PATH &&
-                           (n->type == EMPTY || n->type == PLAYER_PATH);
-            bool canErase = editType == EMPTY && n->type == PLAYER_PATH;
-            if (n != startNode && n != endNode && n->type != OBSTACLE &&
-                (canDraw || canErase)) {
-                n->setType(editType);
-            }
-        }
-
-        if (x == endX && y == endY) break;
-
-        int doubledError = 2 * error;
-        if (doubledError > -dy) {
-            error -= dy;
-            x += stepX;
-        } else if (doubledError < dx) {
-            error += dx;
-            y += stepY;
-        }
-    }
-}
+} // namespace
 
 int main() {
     // SFML 3: VideoMode takes a Vector2u
@@ -141,14 +54,7 @@ int main() {
     }
 
     // Initialize Grid
-    std::vector<std::vector<GridNode*>> grid(
-        ROW_COUNT, std::vector<GridNode*>(COL_COUNT)
-    );
-    for (int y = 0; y < ROW_COUNT; ++y) {
-        for (int x = 0; x < COL_COUNT; ++x) {
-            grid[y][x] = new GridNode(x, y);
-        }
-    }
+    Grid grid = createGrid(CLASSIC_ROWS, CLASSIC_COLS);
 
     // Set Default Start and End
     GridNode* startNode = grid[5][5];
@@ -276,9 +182,12 @@ int main() {
             int y = pos.y / CELL_SIZE;
             NodeType editType = rightPressed ? EMPTY : PLAYER_PATH;
 
+            bool insideGrid = y >= 0 &&
+                              y < static_cast<int>(grid.size()) &&
+                              x >= 0 &&
+                              x < static_cast<int>(grid[y].size());
             if (pos.x >= 0 && pos.x < BOARD_WIDTH &&
-                pos.y >= 0 && pos.y < BOARD_HEIGHT &&
-                x < COL_COUNT && y < ROW_COUNT) {
+                pos.y >= 0 && pos.y < BOARD_HEIGHT && insideGrid) {
                 int lineStartX = x;
                 int lineStartY = y;
                 if (previousMouseX >= 0 && previousMouseY >= 0 &&
@@ -355,9 +264,9 @@ int main() {
 
         // --- Render ---
         window.clear(sf::Color(9, 14, 25));
-        for (int y = 0; y < ROW_COUNT; ++y) {
-            for (int x = 0; x < COL_COUNT; ++x) {
-                window.draw(grid[y][x]->shape);
+        for (const auto& row : grid) {
+            for (GridNode* node : row) {
+                window.draw(node->shape);
             }
         }
         if (gameState == COMPARISON_COMPLETE ||
@@ -374,11 +283,7 @@ int main() {
     }
 
     // Cleanup
-    for (auto& row : grid) {
-        for (auto& node : row) {
-            delete node;
-        }
-    }
+    destroyGrid(grid);
 
     return 0;
 }

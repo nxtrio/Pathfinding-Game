@@ -5,10 +5,11 @@
 
 #include <string>
 
-const int BOARD_WIDTH = COL_COUNT * CELL_SIZE;
-const int BOARD_HEIGHT = ROW_COUNT * CELL_SIZE;
-const int SIDE_PANEL_WIDTH = 320;
-const int WINDOW_WIDTH = BOARD_WIDTH + SIDE_PANEL_WIDTH;
+// Fixed screen-space regions. The active map's world dimensions are separate.
+inline constexpr int BOARD_WIDTH = 1000;
+inline constexpr int BOARD_HEIGHT = 750;
+inline constexpr int SIDE_PANEL_WIDTH = 320;
+inline constexpr int WINDOW_WIDTH = BOARD_WIDTH + SIDE_PANEL_WIDTH;
 
 enum ComparisonPanelAction {
     NO_PANEL_ACTION,

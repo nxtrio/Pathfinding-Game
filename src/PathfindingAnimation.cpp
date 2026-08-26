@@ -201,17 +201,21 @@ void applyComparisonOverlay(std::vector<std::vector<GridNode*>>& grid,
     }
 }
 
-static std::pair<int, int> pathSegmentKey(const GridPosition& start,
-                                          const GridPosition& end) {
-    int startKey = start.y * COL_COUNT + start.x;
-    int endKey = end.y * COL_COUNT + end.x;
-    return std::minmax(startKey, endKey);
+using PathSegmentKey = std::array<int, 4>;
+
+static PathSegmentKey pathSegmentKey(const GridPosition& start,
+                                     const GridPosition& end) {
+    bool startComesFirst = start.y < end.y ||
+                           (start.y == end.y && start.x <= end.x);
+    const GridPosition& first = startComesFirst ? start : end;
+    const GridPosition& second = startComesFirst ? end : start;
+    return {first.x, first.y, second.x, second.y};
 }
 
-static std::set<std::pair<int, int>> collectPathSegmentKeys(
+static std::set<PathSegmentKey> collectPathSegmentKeys(
     const SearchResult& result
 ) {
-    std::set<std::pair<int, int>> keys;
+    std::set<PathSegmentKey> keys;
     for (std::size_t i = 1; i < result.path.size(); ++i) {
         keys.insert(pathSegmentKey(result.path[i - 1], result.path[i]));
     }
@@ -223,12 +227,12 @@ std::vector<ComparisonPathSegment> buildComparisonPathSegments(
     const SearchResult& astar
 ) {
     std::vector<ComparisonPathSegment> segments;
-    std::set<std::pair<int, int>> dijkstraKeys =
+    std::set<PathSegmentKey> dijkstraKeys =
         collectPathSegmentKeys(dijkstra);
-    std::set<std::pair<int, int>> astarKeys = collectPathSegmentKeys(astar);
+    std::set<PathSegmentKey> astarKeys = collectPathSegmentKeys(astar);
 
     for (std::size_t i = 1; i < dijkstra.path.size(); ++i) {
-        std::pair<int, int> key = pathSegmentKey(
+        PathSegmentKey key = pathSegmentKey(
             dijkstra.path[i - 1], dijkstra.path[i]
         );
         segments.push_back({
@@ -239,7 +243,7 @@ std::vector<ComparisonPathSegment> buildComparisonPathSegments(
     }
 
     for (std::size_t i = 1; i < astar.path.size(); ++i) {
-        std::pair<int, int> key = pathSegmentKey(
+        PathSegmentKey key = pathSegmentKey(
             astar.path[i - 1], astar.path[i]
         );
         if (dijkstraKeys.count(key) == 0) {

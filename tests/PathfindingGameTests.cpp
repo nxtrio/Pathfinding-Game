@@ -9,25 +9,18 @@
 #include <string>
 #include <vector>
 
+constexpr int CLASSIC_ROWS = 30;
+constexpr int CLASSIC_COLS = 40;
+
 class TestGrid {
 public:
-    std::vector<std::vector<GridNode*>> nodes;
+    Grid nodes;
 
     TestGrid(int rows, int cols)
-        : nodes(rows, std::vector<GridNode*>(cols)) {
-        for (int y = 0; y < rows; ++y) {
-            for (int x = 0; x < cols; ++x) {
-                nodes[y][x] = new GridNode(x, y);
-            }
-        }
-    }
+        : nodes(createGrid(rows, cols)) {}
 
     ~TestGrid() {
-        for (auto& row : nodes) {
-            for (GridNode* node : row) {
-                delete node;
-            }
-        }
+        destroyGrid(nodes);
     }
 
     TestGrid(const TestGrid&) = delete;
@@ -150,13 +143,13 @@ void addStandardObstacles(TestGrid& grid,
         }
     };
 
-    markColumnWithGap(COL_COUNT / 4, ROW_COUNT / 3);
-    markColumnWithGap(COL_COUNT / 2, ROW_COUNT / 2);
-    markColumnWithGap(3 * COL_COUNT / 4, 2 * ROW_COUNT / 3);
+    markColumnWithGap(CLASSIC_COLS / 4, CLASSIC_ROWS / 3);
+    markColumnWithGap(CLASSIC_COLS / 2, CLASSIC_ROWS / 2);
+    markColumnWithGap(3 * CLASSIC_COLS / 4, 2 * CLASSIC_ROWS / 3);
 }
 
 void testStandardMapOptimalityAndMetrics() {
-    TestGrid grid(ROW_COUNT, COL_COUNT);
+    TestGrid grid(CLASSIC_ROWS, CLASSIC_COLS);
     GridNode* start = grid.nodes[5][5];
     GridNode* end = grid.nodes[15][25];
     start->setType(START);
@@ -189,8 +182,8 @@ void testStandardMapOptimalityAndMetrics() {
     validatePath(grid, start, end, astarResult);
     validateMetrics(dijkstraResult);
     validateMetrics(astarResult);
-    validateTrace(dijkstraResult, start, end, COL_COUNT);
-    validateTrace(astarResult, start, end, COL_COUNT);
+    validateTrace(dijkstraResult, start, end, CLASSIC_COLS);
+    validateTrace(astarResult, start, end, CLASSIC_COLS);
     require(dijkstraResult.metrics.pathLength == astarResult.metrics.pathLength,
             "Dijkstra and A* must find the same optimal length");
     require(start->hCost == 30.0,
@@ -203,6 +196,66 @@ void testStandardMapOptimalityAndMetrics() {
                     "comparison must not mutate logical board state");
         }
     }
+}
+
+void testDynamicGridLifetimeEditingAndHandRoute() {
+    TestGrid grid(35, 51);
+    require(grid.nodes.size() == 35 && grid.nodes.front().size() == 51,
+            "grid construction must honor requested dimensions");
+    require(grid.nodes[34][50]->x == 50 && grid.nodes[34][50]->y == 34,
+            "dynamic grid nodes must retain matching coordinates");
+
+    GridNode* start = grid.nodes[34][0];
+    GridNode* end = grid.nodes[34][50];
+    start->setType(START);
+    end->setType(END);
+
+    editGridLine(grid.nodes, start, end, 0, 34, 50, 34, PLAYER_PATH);
+    require(grid.nodes[34][45]->type == PLAYER_PATH,
+            "line editing must reach columns beyond the Classic width");
+    require(computeHandDrawnPathLength(grid.nodes, start, end) == 50,
+            "hand-route BFS must traverse a non-Classic grid width");
+
+    AlgorithmComparison comparison = runAlgorithmComparison(
+        grid.nodes, start, end, false
+    );
+    require(comparison.status == MATCHING_PATHS &&
+            comparison.dijkstra.metrics.pathLength == 50 &&
+            comparison.astar.metrics.pathLength == 50,
+            "both solvers must remain optimal on a non-Classic grid width");
+
+    editGridLine(grid.nodes, start, end, 20, 34, 30, 34, EMPTY);
+    require(computeHandDrawnPathLength(grid.nodes, start, end) == -1,
+            "erasing a dynamic-grid route must break connectivity");
+
+    editGridLine(grid.nodes, start, end, -5, 34, 55, 34, PLAYER_PATH);
+    require(computeHandDrawnPathLength(grid.nodes, start, end) == 50,
+            "out-of-bounds drag endpoints must clip safely to the grid");
+
+    grid.nodes[34][25]->setType(OBSTACLE);
+    editGridLine(grid.nodes, start, end, 24, 34, 26, 34, PLAYER_PATH);
+    require(grid.nodes[34][25]->type == OBSTACLE &&
+            computeHandDrawnPathLength(grid.nodes, start, end) == -1,
+            "editing must preserve obstacles on dynamic grids");
+
+    GridNode* originalFirstNode = grid.nodes.front().front();
+    bool invalidSizeRejected = false;
+    try {
+        recreateGrid(grid.nodes, 0, 31);
+    } catch (const std::invalid_argument&) {
+        invalidSizeRejected = true;
+    }
+    require(invalidSizeRejected &&
+            grid.nodes.size() == 35 && grid.nodes.front().size() == 51 &&
+            grid.nodes.front().front() == originalFirstNode,
+            "failed grid recreation must preserve the active grid");
+
+    recreateGrid(grid.nodes, 21, 31);
+    require(grid.nodes.size() == 21 && grid.nodes.front().size() == 31,
+            "grid recreation must replace the active dimensions");
+    require(grid.nodes[20][30]->x == 30 && grid.nodes[20][30]->y == 20 &&
+            grid.nodes[20][30]->type == EMPTY,
+            "recreated grids must contain fresh correctly positioned nodes");
 }
 
 void testKnownPathLengthAndPlayerPathTraversability() {
@@ -476,6 +529,14 @@ void testFinalComparisonOverlayAndPathSegments() {
         require(segment.state == SHARED_PATH,
                 "identical paths must render as one neutral bright line");
     }
+
+    dijkstra.path = {{40, 0}, {41, 0}};
+    astar.path = {{0, 1}, {1, 1}};
+    segments = buildComparisonPathSegments(dijkstra, astar);
+    require(segments.size() == 2 &&
+            segments[0].state == DIJKSTRA_PATH_ONLY &&
+            segments[1].state == ASTAR_PATH_ONLY,
+            "path segment identity must not collide beyond Classic width");
 }
 
 void testComparisonPanelModelAndActions() {
@@ -589,6 +650,7 @@ void testRepeatedBenchmark() {
 int main() {
     try {
         testStandardMapOptimalityAndMetrics();
+        testDynamicGridLifetimeEditingAndHandRoute();
         testKnownPathLengthAndPlayerPathTraversability();
         testRepeatedDeterministicRuns();
         testNoPathAndStaleParentReset();

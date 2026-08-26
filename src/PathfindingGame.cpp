@@ -4,6 +4,153 @@
 #include <chrono>
 #include <cmath>
 #include <queue>
+#include <stdexcept>
+#include <utility>
+
+Grid createGrid(int rows, int cols) {
+    if (rows <= 0 || cols <= 0) {
+        throw std::invalid_argument("grid dimensions must be positive");
+    }
+
+    Grid grid(
+        static_cast<std::size_t>(rows),
+        std::vector<GridNode*>(static_cast<std::size_t>(cols), nullptr)
+    );
+
+    try {
+        for (int y = 0; y < rows; ++y) {
+            for (int x = 0; x < cols; ++x) {
+                grid[y][x] = new GridNode(x, y);
+            }
+        }
+    } catch (...) {
+        destroyGrid(grid);
+        throw;
+    }
+
+    return grid;
+}
+
+void destroyGrid(Grid& grid) {
+    for (auto& row : grid) {
+        for (GridNode*& node : row) {
+            delete node;
+            node = nullptr;
+        }
+    }
+    grid.clear();
+}
+
+void recreateGrid(Grid& grid, int rows, int cols) {
+    Grid replacement = createGrid(rows, cols);
+    destroyGrid(grid);
+    grid = std::move(replacement);
+}
+
+int computeHandDrawnPathLength(const Grid& grid,
+                               GridNode* startNode,
+                               GridNode* endNode) {
+    if (grid.empty() || startNode == nullptr || endNode == nullptr) return -1;
+
+    auto containsNode = [&](GridNode* node) {
+        return node->y >= 0 &&
+               node->y < static_cast<int>(grid.size()) &&
+               node->x >= 0 &&
+               node->x < static_cast<int>(grid[node->y].size()) &&
+               grid[node->y][node->x] == node;
+    };
+    if (!containsNode(startNode) || !containsNode(endNode)) return -1;
+
+    std::vector<std::vector<int>> distance;
+    distance.reserve(grid.size());
+    for (const auto& row : grid) {
+        distance.emplace_back(row.size(), -1);
+    }
+
+    std::queue<GridPosition> frontier;
+    distance[startNode->y][startNode->x] = 0;
+    frontier.push({startNode->x, startNode->y});
+
+    auto canWalk = [](GridNode* node) {
+        return node->type == START || node->type == PLAYER_PATH ||
+               node->type == END;
+    };
+
+    constexpr int DX[4] = {1, -1, 0, 0};
+    constexpr int DY[4] = {0, 0, 1, -1};
+
+    while (!frontier.empty()) {
+        GridPosition current = frontier.front();
+        frontier.pop();
+
+        if (current.x == endNode->x && current.y == endNode->y) {
+            return distance[current.y][current.x];
+        }
+
+        for (int direction = 0; direction < 4; ++direction) {
+            int nextX = current.x + DX[direction];
+            int nextY = current.y + DY[direction];
+            if (nextY < 0 || nextY >= static_cast<int>(grid.size()) ||
+                nextX < 0 ||
+                nextX >= static_cast<int>(grid[nextY].size()) ||
+                distance[nextY][nextX] != -1) {
+                continue;
+            }
+
+            GridNode* neighbor = grid[nextY][nextX];
+            if (!canWalk(neighbor)) continue;
+
+            distance[nextY][nextX] = distance[current.y][current.x] + 1;
+            frontier.push({nextX, nextY});
+        }
+    }
+
+    return -1;
+}
+
+void editGridLine(Grid& grid,
+                  GridNode* startNode,
+                  GridNode* endNode,
+                  int startX,
+                  int startY,
+                  int endX,
+                  int endY,
+                  NodeType editType) {
+    int x = startX;
+    int y = startY;
+    int dx = std::abs(endX - startX);
+    int dy = std::abs(endY - startY);
+    int stepX = startX < endX ? 1 : -1;
+    int stepY = startY < endY ? 1 : -1;
+    int error = dx - dy;
+
+    while (true) {
+        if (y >= 0 && y < static_cast<int>(grid.size()) && x >= 0 &&
+            x < static_cast<int>(grid[y].size())) {
+            GridNode* node = grid[y][x];
+            bool canDraw = editType == PLAYER_PATH &&
+                           (node->type == EMPTY ||
+                            node->type == PLAYER_PATH);
+            bool canErase = editType == EMPTY &&
+                            node->type == PLAYER_PATH;
+            if (node != startNode && node != endNode &&
+                node->type != OBSTACLE && (canDraw || canErase)) {
+                node->setType(editType);
+            }
+        }
+
+        if (x == endX && y == endY) break;
+
+        int doubledError = 2 * error;
+        if (doubledError > -dy) {
+            error -= dy;
+            x += stepX;
+        } else if (doubledError < dx) {
+            error += dx;
+            y += stepY;
+        }
+    }
+}
 
 // Immutable priority snapshot used by both algorithms.
 struct QueueEntry {
