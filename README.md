@@ -242,17 +242,3 @@ Run it directly through CTest:
 ```bash
 ctest --test-dir build-release --output-on-failure
 ```
-
-## Capturing a Demo
-
-For a reproducible screenshot or GIF, record the selected generator, dimensions, and displayed seed before starting. Capture the entire application window so the grid, map metadata, and comparison panel remain visible together.
-
-A useful sequence is:
-
-1. Select a procedural map and randomize its seed.
-2. Optionally draw a player route.
-3. Select 2× or 4× speed and start the comparison.
-4. Pause during a frontier replay to demonstrate pan and zoom.
-5. Continue through A* and end on the final overlay with metrics and the 200-run median label visible.
-
-Release builds are recommended for captured benchmark values.
